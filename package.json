@@ -1,0 +1,19 @@
+{
+  "name": "headless-chrome-scraper",
+  "version": "1.0.0",
+  "description": "headless chrome scraper using puppeteer",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "headless",
+    "chrome",
+    "scraper"
+  ],
+  "author": "chris galardi",
+  "license": "MIT",
+  "dependencies": {
+    "esm": "^3.0.15"
+  }
+}
