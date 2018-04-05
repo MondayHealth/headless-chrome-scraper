@@ -15,6 +15,12 @@
   "license": "MIT",
   "dependencies": {
     "esm": "^3.0.15",
-    "puppeteer": "^1.2.0"
-  }
+    "puppeteer": "^1.2.0",
+    "redis": "^2.8.0",
+    "request": "^2.85.0"
+  },
+  "devDependencies": {
+    "prettier": "1.11.1"
+  },
+  "prettier": {}
 }
