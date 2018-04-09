@@ -1,6 +1,6 @@
 import request from "request";
 import { promisify } from "util";
-import redis from "redis";
+import ProgressBar from "progress";
 
 import Page from "./../page";
 
@@ -11,12 +11,19 @@ const BASE_URL =
 
 const RESULTS_PER_PAGE = 25;
 
+const PAGINATION_KEY = "aetna-last-page";
+const RESULT_SET_KEY = "aetna-providers";
+
 export class Aetna {
-  constructor(browser) {
+  constructor(browser, redis) {
     this._browser = browser;
     this._page = null;
     this._clientID = null;
     this._userAgent = null;
+
+    this._rGet = promisify(redis.get).bind(redis);
+    this._rSet = promisify(redis.set).bind(redis);
+    this._rHSet = promisify(redis.hset).bind(redis);
   }
 
   async initialize() {
@@ -28,7 +35,7 @@ export class Aetna {
   }
 
   async destroy() {
-    // await this._page.close();
+    await this._page.close();
   }
 
   static extractProviderList(responseBody) {
@@ -109,6 +116,7 @@ export class Aetna {
     const json = true;
     const gzip = true;
     return new Promise((resolve, reject) => {
+      // console.log("requesting", baseUrl, url);
       request({ baseUrl, url, headers, json, gzip }, (e, r, result) => {
         if (e) {
           reject(e);
@@ -152,7 +160,7 @@ export class Aetna {
   static checkResponseForError(response) {
     const status = response.providersResponse.status;
 
-    if (status.statusCode !== 200)
+    if (!status.statusCode || parseInt(status.statusCode) !== 0)
     {
       return status;
     }
@@ -160,16 +168,7 @@ export class Aetna {
     return null;
   }
 
-  async scanProviders() {
-    const client = redis.createClient();
-    const paginationKey = "aetna-last-page";
-    const resultsSetKey = "aetna-providers";
-    const rGet = promisify(client.get).bind(client);
-    const rSet = promisify(client.set).bind(client);
-    const rHSet = promisify(client.hset).bind(client);
-
-    let pageIndex = (await rGet(paginationKey)) || 0;
-
+  async scanPage(pageIndex) {
     const { result, rateLimit } = await this.listProviders(pageIndex);
     Aetna.checkResponseForError(result);
     const providers = Aetna.extractProviderList(result);
@@ -183,12 +182,41 @@ export class Aetna {
       const name = provider.providerInformation.providerDisplayName.full;
       const id = provider.providerInformation.providerID;
       const raw = JSON.stringify(provider);
-      rHSet(resultsSetKey, id, raw).then(result => {
-        console.log("stored provider", id, name, result);
-      });
+      this._rHSet(RESULT_SET_KEY, id, raw);
     });
 
+    return pagination;
+  }
+
+  async scanProviders() {
+
+    let pageIndex = parseInt((await this._rGet(PAGINATION_KEY)) || 0);
+
+    console.log("Starting pagination with page", pageIndex);
+    const firstPagination = await this.scanPage(pageIndex);
+    const resultsPerPage = firstPagination.paging.perPage;
+    const total = firstPagination.paging.total / resultsPerPage;
+    console.log("Done.", total, "pages remain.");
+
     pageIndex += 1;
-    await rSet(paginationKey, pageIndex).then(r => console.log("set", r));
+    await this._rSet(PAGINATION_KEY, pageIndex);
+
+    const bar = new ProgressBar('scraping [:bar] :rate :percent :etas', {
+      total: total,
+      curr: pageIndex,
+      complete: "=",
+      incomplete: " ",
+      width: 30
+    });
+
+    // @TODO: Is <= correct ?
+    while (pageIndex <= total) {
+      await this.scanPage(pageIndex);
+      pageIndex += 1;
+      await this._rSet(PAGINATION_KEY, pageIndex);
+      bar.tick(1, null);
+    }
+
+    console.log("\nComplete!");
   }
 }

@@ -1,10 +1,13 @@
 import puppeteer from "puppeteer";
 import { Aetna } from "./payors/aetna";
+import redis from "redis";
 
 // noinspection JSUnusedGlobalSymbols
 export async function bootstrap() {
+  const client = redis.createClient();
   const browser = await puppeteer.launch();
-  const a = new Aetna(browser);
+
+  const a = new Aetna(browser, client);
 
   try {
     await a.initialize();
@@ -15,5 +18,13 @@ export async function bootstrap() {
   }
 
   console.log("Closing browser...");
-  await browser.close();
+
+  browser
+    .close()
+    .then(() => console.log("Browser closed."))
+    .catch(e => console.error(e));
+
+  client.quit();
+
+  console.log("Should exit now.");
 }

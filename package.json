@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "headless chrome scraper using puppeteer",
   "main": "index.js",
+  "repository": "https://github.com/MondayHealth/headless-chrome-scraper",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -14,7 +15,8 @@
   "author": "chris galardi",
   "license": "MIT",
   "dependencies": {
-    "esm": "^3.0.15",
+    "esm": "^3.0.17",
+    "progress": "^2.0.0",
     "puppeteer": "^1.2.0",
     "redis": "^2.8.0",
     "request": "^2.85.0"
