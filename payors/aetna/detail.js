@@ -15,7 +15,6 @@ async function wait(ms) {
 export default class Detail extends Base {
   constructor(browser, redis) {
     super(browser, redis);
-    this._providerID = null;
     this._locationID = null;
   }
 
@@ -33,7 +32,7 @@ export default class Detail extends Base {
     return result.providerResponse.readProviderResponse.providerDetailsResponse;
   }
 
-  getProviderPageURL(individual) {
+  static getProviderPageURL(pid, lid, individual) {
     const page = individual ? "providerDetails" : "providerOrgDetails";
     const pType = individual ? "Individual" : "Organization";
     return (
@@ -41,9 +40,9 @@ export default class Detail extends Base {
       "#/contentPage?page=" +
       page +
       "&proId=" +
-      this._providerID +
+      pid +
       "&locId=" +
-      this._locationID +
+      lid +
       "&distance=0.04&pType=" +
       pType +
       "&site_id=dse&language=en"
@@ -70,13 +69,9 @@ export default class Detail extends Base {
   }
 
   async getDetailForProvider(providerID) {
-    if (providerID === this._providerID) {
-      return;
-    }
 
     const existingData = await this.getProviderDataForID(providerID);
-    this._providerID = providerID;
-    this._locationID = existingData.providerLocations.locationID;
+    const lid = existingData.providerLocations.locationID;
     const individual = existingData.providerInformation.type === "Individual";
 
     if (
@@ -96,21 +91,27 @@ export default class Detail extends Base {
       page
     );
 
-    await page.goThenWait(this.getProviderPageURL(individual));
-
-    await wait(1000);
+    const url = Detail.getProviderPageURL(providerID, lid, individual);
+    await page.goThenWait(url);
 
     // Get details
     const providerDetails = await waitForDetails;
 
     // Get other office details
-    await page.click("a#headingOtherOffice");
+
+    const officeSelector = "a#headingOtherOffice";
+    await page.waitForSelector(officeSelector);
+    await page.click(officeSelector);
+    console.log("wait for office");
     const otherOffices = await waitForOtherOffices;
 
-    await wait(1000);
+    await wait(500);
 
     // Wait for plan data
-    await page.click("a#headingPlanDetails");
+    const planSelector = "a#headingPlanDetails";
+    await page.waitForSelector(planSelector);
+    await page.click(planSelector);
+    console.log("wait for data");
     const planData = await waitForPlanData;
 
     const ret = {
@@ -119,7 +120,7 @@ export default class Detail extends Base {
       plans: planData
     };
 
-    this._rHSet(DETAIL_SET_KEY, this._providerID, JSON.stringify(ret, null, 2));
+    this._rHSet(DETAIL_SET_KEY, providerID, JSON.stringify(ret, null, 2));
 
     return page;
   }

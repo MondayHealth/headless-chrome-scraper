@@ -81,10 +81,8 @@ export default class Page {
     }, newState);
   }
 
-  async getSessionState() {
-    return this._page.evaluate(() => {
-      return JSON.stringify(sessionStorage);
-    });
+  async waitForSelector(selector) {
+    return this._page.waitForSelector(selector);
   }
 
   async click(selector, delay) {
