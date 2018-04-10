@@ -5,6 +5,14 @@ import Page from "../../page/index";
 
 const RATE_LIMIT_WARN_THRESHOLD = 50;
 
+export const RESULT_SET_KEY = "aetna:providers";
+
+export function queryStringFromParams(paramMap) {
+  return Object.entries(paramMap)
+    .map(([key, value]) => `${key}=${value}`)
+    .join("&");
+}
+
 export default class Base {
   constructor(browser, redis) {
     this._browser = browser;
@@ -15,6 +23,16 @@ export default class Base {
     this._rGet = promisify(redis.get).bind(redis);
     this._rSet = promisify(redis.set).bind(redis);
     this._rHSet = promisify(redis.hset).bind(redis);
+    this._hGet = promisify(redis.hget).bind(redis);
+    this._hKeys = promisify(redis.hkeys).bind(redis);
+  }
+
+  async getProviderIDs() {
+    return this._hKeys(RESULT_SET_KEY);
+  }
+
+  async getProviderDataForID(providerID) {
+    return JSON.parse(await this._hGet(RESULT_SET_KEY, providerID));
   }
 
   async getClientIDFromPage(page) {
@@ -52,18 +70,35 @@ export default class Base {
     return { limit, remaining };
   }
 
-  async initialize() {
+  async reInitPage() {
+    if (this._page) {
+      this._page.close().then();
+    }
+
     this._page = await Page.newPageFromBrowser(this._browser);
+  }
+
+  async initialize(wait) {
+    await this.reInitPage();
+
     const getClientIDPromise = this.getClientIDFromPage(this._page);
     const suffix =
       "#/contentPage?page=providerSearchLanding&site_id=dse&language=en";
-    this._page.go(Base.getReferrer() + suffix).then();
+
+    const opts = wait ? { waitUntil: 'networkidle2' } : {};
+    const goPromise = this._page.go(Base.getReferrer() + suffix, opts);
     this._userAgent = this._page.getUserAgent();
     this._clientID = await getClientIDPromise;
+
+    if (wait) {
+      return goPromise;
+    }
   }
 
   static checkResponseForError(response) {
-    const status = response.providersResponse.status;
+    const status = response.providersResponse
+      ? response.providersResponse.status
+      : response.providerResponse.status;
 
     if (!status.statusCode || parseInt(status.statusCode) !== 0) {
       return status;
@@ -115,7 +150,9 @@ export default class Base {
   }
 
   async destroy() {
-    await this._page.close();
+    if (this._page) {
+      await this._page.close();
+    }
   }
 
   static getReferrer() {

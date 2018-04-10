@@ -1,10 +1,9 @@
 import { Bar, Presets } from "../bar";
-import Base from "./base";
+import Base, { queryStringFromParams, RESULT_SET_KEY } from "./base";
 
 const RESULTS_PER_PAGE = 25;
 
 const PAGINATION_KEY = "aetna:last-page";
-const RESULT_SET_KEY = "aetna:providers";
 const TOTAL_FROM_LAST = "aetna:total-last";
 
 export default class List extends Base {
@@ -51,7 +50,7 @@ export default class List extends Base {
 
     const lastOnPage = RESULTS_PER_PAGE * this._currentPage;
 
-    const params = {
+    const paramMap = {
       searchText: "Behavioral%20Health%20Professionals",
       listFieldSelections: "affiliations",
       isGuidedSearch: false,
@@ -65,15 +64,14 @@ export default class List extends Base {
       firstRecordOnPage: RESULTS_PER_PAGE * (this._currentPage - 1) + 1,
       lastRecordOnPage: Math.min(lastOnPage, this._currentTotal)
     };
-    const param_string = Object.entries(params)
-      .map(([key, value]) => `${key}=${value}`)
-      .join("&");
+
+    const paramString = queryStringFromParams(paramMap);
     const base = "healthcare/prod/v3/publicdse_providersearch";
 
     // We want to make sure this URL looks EXACTLY like what the SPA produces
     const last = "&&responseLanguagePreference=en&siteId=dse";
 
-    return `${base}?${param_string}${last}`;
+    return `${base}?${paramString}${last}`;
   }
 
   async scanPage() {

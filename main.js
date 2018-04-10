@@ -1,5 +1,5 @@
 import puppeteer from "puppeteer";
-import { scanProviders } from "./payors/aetna";
+import { scanProviders, loadDetail } from "./payors/aetna";
 import redis from "redis";
 
 // noinspection JSUnusedGlobalSymbols
@@ -8,7 +8,8 @@ export async function bootstrap() {
   const browser = await puppeteer.launch();
 
   try {
-    await scanProviders(browser, redisClient);
+    // await scanProviders(browser, redisClient);
+    await loadDetail(browser, redisClient);
   } catch (e) {
     console.error(e);
   }
