@@ -1,4 +1,4 @@
-import ProgressBar from "progress";
+import { Bar, Presets } from "../bar";
 import Base from "./base";
 
 const RESULTS_PER_PAGE = 25;
@@ -77,7 +77,7 @@ export default class List extends Base {
   async scanPage() {
     const url = this.providerInfoQuery();
     const headers = this.headersForAPIRequest();
-    const { result } = Base.apiRequest(url, headers);
+    const { result } = await Base.apiRequest(url, headers);
     const providers = List.extractProviderList(result);
     const pagination = List.extractPagingData(result);
 
@@ -97,36 +97,33 @@ export default class List extends Base {
   async scanProviders() {
     let hardStop = false;
 
+    const bar = new Bar({}, Presets.shades_classic);
+
     const sigHandle = () => {
-      bar.interrupt("Caught SIGTERM! Stopping...");
+      bar.stop();
+      console.log("Caught SIGTERM! Stopping...");
       hardStop = true;
     };
 
-    process.on("SIGTERM", sigHandle);
     process.on("SIGINT", sigHandle);
 
     console.log("Preliminary scrape");
     await this.scanPage();
     console.log("Done.", this._currentTotal, "providers");
 
-    const barFmt = " scraping [:bar] :current / :total :percent :etas";
-    const bar = new ProgressBar(barFmt, {
-      total: this.getTotalPages(),
-      curr: this._currentPage,
-      complete: "=",
-      incomplete: " ",
-      width: 20
-    });
+    bar.start(this.getTotalPages(), this._currentPage);
 
     // @TODO: Is <= correct ?
     while (this._currentPage <= this.getTotalPages() && !hardStop) {
       await this.scanPage();
-      bar.tick(1, null);
+      bar.update(this._currentPage);
     }
 
-    process.removeListener("SIGINT", sigHandle);
-    process.removeListener("SIGTERM", sigHandle);
+    bar.update(this._currentPage);
+    bar.stop();
 
-    console.log("\nComplete!");
+    this._rSet(PAGINATION_KEY, )
+
+    process.removeListener("SIGINT", sigHandle);
   }
 }
