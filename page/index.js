@@ -45,6 +45,15 @@ export default class Page {
     return () => this._page.removeListener("response", callback);
   }
 
+  debugRequests(page) {
+    return new Promise(resolve => {
+      const stop = page.listenForRequests(intercepted => {
+        console.log(">", intercepted.url());
+      });
+      resolve(stop);
+    });
+  }
+
   async close() {
     const p = this._page;
     this._page = null;

@@ -1,4 +1,4 @@
-import Base, { queryStringFromParams } from "./base";
+import Base from "./base";
 import Page from "../../page";
 import sessionState from "./session_state.json";
 
@@ -6,35 +6,22 @@ const BASE =
   "healthcare/prod/navigator/v3/publicdse_providerdetails/" +
   "publicdse_individualproviderdetails";
 
+const DETAIL_SET_KEY = "aetna:detail";
+
+async function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export default class Detail extends Base {
   constructor(browser, redis) {
     super(browser, redis);
     this._providerID = null;
     this._locationID = null;
-    this._oldPage = null;
-  }
-
-  getQueryString() {
-    const paramMap = {
-      providerIdentifier: this._providerID,
-      serviceLocationIdentifier: this._locationID,
-      listFieldSelections: "affiliations",
-      suppressFutureProv: false,
-      suppressFutureGroup: false
-    };
-
-    let ret = queryStringFromParams(paramMap);
-
-    ret += "&&responseLanguagePreference=en&siteId=dse";
-
-    return ret;
   }
 
   async initialize() {
     await super.initialize(true);
-    this._oldPage = this._page;
-    this._page = null;
-    await this._oldPage.setSessionState(sessionState);
+    await this._page.setSessionState(sessionState);
   }
 
   static extractLastUpdate(result) {
@@ -44,13 +31,6 @@ export default class Detail extends Base {
 
   static extractProviderDetail(result) {
     return result.providerResponse.readProviderResponse.providerDetailsResponse;
-  }
-
-  async destroy() {
-    await super.destroy();
-    if (this._oldPage) {
-      await this._oldPage.close();
-    }
   }
 
   getProviderPageURL(individual) {
@@ -70,23 +50,12 @@ export default class Detail extends Base {
     );
   }
 
-  async snoopRequests() {
+  async catchRequest(subString, page) {
     return new Promise(resolve => {
-      const stop = this._page.listenForRequests(intercepted => {
-        console.log(">", intercepted.url());
-      });
-      resolve(stop);
-    });
-  }
-
-  async catchRequest(subString) {
-    return new Promise(resolve => {
-      const stop = this._page.onResponse(intercepted => {
+      const stop = page.onResponse(intercepted => {
         if (intercepted.url().indexOf(subString) < 0) {
           return;
         }
-
-        console.log("CAUGHT", intercepted.url());
 
         if (intercepted.request().method() !== "GET") {
           return;
@@ -108,31 +77,50 @@ export default class Detail extends Base {
     const existingData = await this.getProviderDataForID(providerID);
     this._providerID = providerID;
     this._locationID = existingData.providerLocations.locationID;
+    const individual = existingData.providerInformation.type === "Individual";
 
-    if (this._page) {
-      this._page.close();
+    if (
+      !individual &&
+      existingData.providerInformation.type !== "Organization"
+    ) {
+      console.error("UNKNOWN TYPE", existingData.type);
     }
 
-    this._page = await Page.newPageFromBrowser(this._browser);
-    const stopSnooping = await this.snoopRequests();
+    const page = await Page.newPageFromBrowser(this._browser);
 
-    const waitForDetails = this.catchRequest(BASE);
-    const waitForPlanData = this.catchRequest("providerplanandnetworkdetails");
-    const networkIdle = this._page.goThenWait(this.getProviderPageURL(true));
+    // install watchers
+    const waitForDetails = this.catchRequest(BASE, page);
+    const waitForOtherOffices = this.catchRequest("lastRecordOnPage", page);
+    const waitForPlanData = this.catchRequest(
+      "providerplanandnetworkdetails",
+      page
+    );
 
-    // Get the base provider details
+    await page.goThenWait(this.getProviderPageURL(individual));
+
+    await wait(1000);
+
+    // Get details
     const providerDetails = await waitForDetails;
 
-    await networkIdle;
+    // Get other office details
+    await page.click("a#headingOtherOffice");
+    const otherOffices = await waitForOtherOffices;
 
-    // @TODO: Get other offices
-
-    this._page.click("a#headingPlanDetails");
+    await wait(1000);
 
     // Wait for plan data
+    await page.click("a#headingPlanDetails");
     const planData = await waitForPlanData;
 
-    console.log(JSON.stringify(planData, null, 4));
-    return stopSnooping();
+    const ret = {
+      details: providerDetails,
+      offices: otherOffices,
+      plans: planData
+    };
+
+    this._rHSet(DETAIL_SET_KEY, this._providerID, JSON.stringify(ret, null, 2));
+
+    return page;
   }
 }
