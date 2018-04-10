@@ -25,7 +25,7 @@ class BarPolyfill {
   }
 
   render() {
-    const percent = this._total / this._current;
+    const percent = this._current / this._total;
     console.log(` ${this._current}/${this._total} - ${percent}%`);
   }
 }

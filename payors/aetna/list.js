@@ -11,6 +11,7 @@ export default class List extends Base {
   constructor(browser, redis) {
     super(browser, redis);
     this._currentPage = 0;
+    this._currentTotal = 0;
   }
 
   async updatePagination(data) {
@@ -24,6 +25,7 @@ export default class List extends Base {
   async initialize() {
     await super.initialize();
     this._currentPage = parseInt((await this._rGet(PAGINATION_KEY)) || 0);
+    this._currentTotal = parseInt((await this._rGet(TOTAL_FROM_LAST)) || 0);
   }
 
   static extractProviderList(responseBody) {
@@ -47,7 +49,7 @@ export default class List extends Base {
       );
     }
 
-    const lastOnPage = RESULTS_PER_PAGE * (this._currentPage + 1);
+    const lastOnPage = RESULTS_PER_PAGE * this._currentPage;
 
     const params = {
       searchText: "Behavioral%20Health%20Professionals",
@@ -60,7 +62,7 @@ export default class List extends Base {
       postalCode: 10199,
       direction: "next",
       total: this._currentTotal,
-      firstRecordOnPage: RESULTS_PER_PAGE * this._currentPage + 1,
+      firstRecordOnPage: RESULTS_PER_PAGE * (this._currentPage - 1) + 1,
       lastRecordOnPage: Math.min(lastOnPage, this._currentTotal)
     };
     const param_string = Object.entries(params)
@@ -122,7 +124,8 @@ export default class List extends Base {
     bar.update(this._currentPage);
     bar.stop();
 
-    this._rSet(PAGINATION_KEY, )
+    this._rSet(PAGINATION_KEY, this._currentPage);
+    this._rSet(TOTAL_FROM_LAST, this._currentTotal);
 
     process.removeListener("SIGINT", sigHandle);
   }
