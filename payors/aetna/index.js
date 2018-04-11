@@ -9,9 +9,12 @@ export async function scanProviders(browser, redis) {
 }
 
 export async function loadDetail(browser, redis) {
-  const d = new Detail(browser, redis);
-  const initPromise = d.initialize();
-  const providerIDs = await d.getProviderIDs();
+  const detail = new Detail(browser, redis);
+  const initPromise = detail.initialize();
   await initPromise;
-  await d.getDetailForProvider(providerIDs[0]);
+
+  await detail.getAll();
+
+  console.log("Cleaning up");
+  await detail.destroy();
 }

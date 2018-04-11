@@ -54,10 +54,13 @@ export default class Page {
     });
   }
 
+  async $(selector) {
+    return this._page.$(selector);
+  }
+
   async close() {
     const p = this._page;
     this._page = null;
-    console.debug("Closing page", p.url());
     await p.close();
   }
 
@@ -90,7 +93,7 @@ export default class Page {
   }
 
   async goThenWait(url) {
-    return this.go(url, { waitUntil: 'networkidle2' });
+    return this.go(url, { waitUntil: "networkidle2" });
   }
 
   async go(url, opts) {

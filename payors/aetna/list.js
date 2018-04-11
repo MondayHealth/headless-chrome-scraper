@@ -82,12 +82,20 @@ export default class List extends Base {
     const pagination = List.extractPagingData(result);
 
     providers.forEach(provider => {
+      // Currently we only deal with individuals
+      if (!List.listEntryIsAnIndividual(provider)) {
+        return;
+      }
+
       const id = provider.providerInformation.providerID;
-      const raw = JSON.stringify(provider);
-      this._rHSet(RESULT_SET_KEY, id, raw);
+      this._rHSet(RESULT_SET_KEY, id, JSON.stringify(provider));
     });
 
     return await this.updatePagination(pagination);
+  }
+
+  static listEntryIsAnIndividual(data) {
+    return data.providerInformation.type === "Individual";
   }
 
   getTotalPages() {

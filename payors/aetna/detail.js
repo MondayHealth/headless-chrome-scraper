@@ -1,6 +1,8 @@
 import Base from "./base";
 import Page from "../../page";
 import sessionState from "./session_state.json";
+import { jitterWait } from "../time-utils";
+import List from "./list";
 
 const BASE =
   "healthcare/prod/navigator/v3/publicdse_providerdetails/" +
@@ -8,28 +10,14 @@ const BASE =
 
 const DETAIL_SET_KEY = "aetna:detail";
 
-async function wait(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 export default class Detail extends Base {
   constructor(browser, redis) {
     super(browser, redis);
-    this._locationID = null;
   }
 
   async initialize() {
     await super.initialize(true);
     await this._page.setSessionState(sessionState);
-  }
-
-  static extractLastUpdate(result) {
-    return result.providerResponse.readProviderResponse.listInfoExchanges
-      .listInfoExchange[0].values.value[0].value;
-  }
-
-  static extractProviderDetail(result) {
-    return result.providerResponse.readProviderResponse.providerDetailsResponse;
   }
 
   static getProviderPageURL(pid, lid, individual) {
@@ -68,17 +56,82 @@ export default class Detail extends Base {
     });
   }
 
-  async getDetailForProvider(providerID) {
+  async getAll(overwrite) {
+    const providerIDs = await this.getProviderIDs();
+    const keyArray = await this._hKeys(DETAIL_SET_KEY);
+    const alreadyLoaded = new Set(keyArray);
+    const len = providerIDs.length;
+    const loadPromises = new Set();
+    const MAX_CONCURRENT = 10;
 
+    const sigHandle = () => {
+      console.log("Caught SIGTERM! Stopping...");
+      hardStop = true;
+    };
+
+    process.on("SIGINT", sigHandle);
+
+    let index = 0;
+    let hardStop = false;
+    const findNextProviderID = () => {
+      while (index < len) {
+        let id = providerIDs[index++];
+        if (!alreadyLoaded.has(id)) {
+          alreadyLoaded.add(id);
+          return id;
+        }
+      }
+
+      return null;
+    };
+
+    const loadAndClose = async providerID => {
+      if (hardStop) {
+        return;
+      }
+      console.debug(`${new Date()} : loading ${providerID} ${index}/${len}`);
+      const page = await this.getDetailForProvider(providerID);
+
+      // A null response means that we're not gonna process this one
+      if (page !== null) {
+        await jitterWait(2500, 2500);
+        page.close();
+        await jitterWait(2500, 2500);
+      }
+
+      // If there are still more to be processed, check them
+      const nextID = findNextProviderID();
+      if (nextID !== null && !hardStop) {
+        return loadAndClose(nextID);
+      }
+    };
+
+    // Start a limited amount of processes
+    for (let i = 0; i < MAX_CONCURRENT; i++) {
+      const nextID = findNextProviderID();
+      if (nextID === null || hardStop) {
+        break;
+      }
+      let prom = loadAndClose(nextID);
+      loadPromises.add(prom.catch(e => console.error(e)));
+      await jitterWait(1000, 2000);
+    }
+
+    // Wait for all page closures to return
+    console.log("Waiting for all page promises to resolve...");
+    await Promise.all(Array.from(loadPromises));
+
+    process.removeListener("SIGINT", sigHandle);
+  }
+
+
+
+  async getDetailForProvider(providerID) {
     const existingData = await this.getProviderDataForID(providerID);
     const lid = existingData.providerLocations.locationID;
-    const individual = existingData.providerInformation.type === "Individual";
 
-    if (
-      !individual &&
-      existingData.providerInformation.type !== "Organization"
-    ) {
-      console.error("UNKNOWN TYPE", existingData.type);
+    if (!List.listEntryIsAnIndividual(existingData)) {
+      return null;
     }
 
     const page = await Page.newPageFromBrowser(this._browser);
@@ -91,36 +144,34 @@ export default class Detail extends Base {
       page
     );
 
-    const url = Detail.getProviderPageURL(providerID, lid, individual);
+    const url = Detail.getProviderPageURL(providerID, lid, true);
     await page.goThenWait(url);
 
     // Get details
-    const providerDetails = await waitForDetails;
+    const details = await waitForDetails;
 
-    // Get other office details
-
-    const officeSelector = "a#headingOtherOffice";
-    await page.waitForSelector(officeSelector);
-    await page.click(officeSelector);
-    console.log("wait for office");
-    const otherOffices = await waitForOtherOffices;
-
-    await wait(500);
-
-    // Wait for plan data
-    const planSelector = "a#headingPlanDetails";
-    await page.waitForSelector(planSelector);
-    await page.click(planSelector);
-    console.log("wait for data");
-    const planData = await waitForPlanData;
-
-    const ret = {
-      details: providerDetails,
-      offices: otherOffices,
-      plans: planData
+    const clickPageSelector = async (select, promise) => {
+      await jitterWait(500, 250);
+      await page.click(select);
+      await jitterWait(500, 250);
+      await page.click(select);
+      return promise;
     };
 
-    this._rHSet(DETAIL_SET_KEY, providerID, JSON.stringify(ret, null, 2));
+    // Get other office details
+    const offices = await clickPageSelector(
+      "a#headingOtherOffice",
+      waitForOtherOffices
+    );
+
+    // Wait for plan data
+    let plans = await clickPageSelector(
+      "a#headingPlanDetails",
+      waitForPlanData
+    );
+
+    const save = JSON.stringify({ details, offices, plans });
+    this._rHSet(DETAIL_SET_KEY, providerID, save);
 
     return page;
   }
