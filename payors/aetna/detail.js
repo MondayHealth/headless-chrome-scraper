@@ -64,6 +64,8 @@ export default class Detail extends Base {
     const loadPromises = new Set();
     const MAX_CONCURRENT = 10;
 
+    let hardStop = false;
+
     const sigHandle = () => {
       console.log("Caught SIGTERM! Stopping...");
       hardStop = true;
@@ -72,7 +74,6 @@ export default class Detail extends Base {
     process.on("SIGINT", sigHandle);
 
     let index = 0;
-    let hardStop = false;
     const findNextProviderID = () => {
       while (index < len) {
         let id = providerIDs[index++];
@@ -123,8 +124,6 @@ export default class Detail extends Base {
 
     process.removeListener("SIGINT", sigHandle);
   }
-
-
 
   async getDetailForProvider(providerID) {
     const existingData = await this.getProviderDataForID(providerID);
