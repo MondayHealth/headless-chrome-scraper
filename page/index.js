@@ -58,6 +58,10 @@ export default class Page {
     return this._page.$(selector);
   }
 
+  async do(fxn, params) {
+    return this._page.evaluate(fxn, params);
+  }
+
   async close() {
     const p = this._page;
     this._page = null;
@@ -90,6 +94,16 @@ export default class Page {
 
   async click(selector, delay) {
     return this._page.click(selector, { delay: delay || 100 });
+  }
+
+  async clickAndWaitForNav(select, delay) {
+    const navPromise = this._page.waitForNavigation({
+      waitUntil: "networkidle2 "
+    });
+
+    const clickPromise = this.click(select, delay);
+
+    return Promise.all([navPromise, clickPromise]);
   }
 
   async goThenWait(url) {

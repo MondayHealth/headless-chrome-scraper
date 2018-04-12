@@ -1,6 +1,7 @@
 import puppeteer from "puppeteer";
 import { scanProviders, loadDetail } from "./payors/aetna";
 import redis from "redis";
+import { crawl } from "./payors/pt";
 
 // noinspection JSUnusedGlobalSymbols
 export async function bootstrap() {
@@ -9,7 +10,8 @@ export async function bootstrap() {
 
   try {
     // await scanProviders(browser, redisClient);
-    await loadDetail(browser, redisClient);
+    // await loadDetail(browser, redisClient);
+    await crawl(browser, redisClient);
   } catch (e) {
     console.error(e);
   }

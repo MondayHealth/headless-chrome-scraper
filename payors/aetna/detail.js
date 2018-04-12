@@ -76,7 +76,7 @@ export default class Detail extends Base {
     const findNextProviderID = () => {
       while (index < len) {
         let id = providerIDs[index++];
-        if (!alreadyLoaded.has(id)) {
+        if (!alreadyLoaded.has(id) || overwrite) {
           alreadyLoaded.add(id);
           return id;
         }
