@@ -6,7 +6,7 @@ import { crawl } from "./payors/pt";
 // noinspection JSUnusedGlobalSymbols
 export async function bootstrap() {
   const redisClient = redis.createClient();
-  const browser = await puppeteer.launch();
+  const browser = await puppeteer.launch({ headless: false });
 
   try {
     // await scanProviders(browser, redisClient);

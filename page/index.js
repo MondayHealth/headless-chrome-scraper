@@ -89,16 +89,29 @@ export default class Page {
   }
 
   async waitForSelector(selector) {
-    return this._page.waitForSelector(selector);
+    return this._page.waitForSelector(selector, { visible: true });
+  }
+
+  async waitForXPath(path) {
+    return this._page.waitForXPath(path, { visible: true });
+  }
+
+  async getHTML() {
+    return this._page.content();
   }
 
   async click(selector, delay) {
     return this._page.click(selector, { delay: delay || 100 });
   }
 
+  async type(selector, input) {
+    await this._page.waitForSelector(selector);
+    return this._page.type(selector, input, { delay: 100 });
+  }
+
   async clickAndWaitForNav(select, delay) {
     const navPromise = this._page.waitForNavigation({
-      waitUntil: "networkidle2 "
+      waitUntil: "networkidle2"
     });
 
     const clickPromise = this.click(select, delay);
