@@ -8,10 +8,10 @@ export default class Crawler {
   constructor(browser, redis) {
     this._browser = browser;
     this._page = null;
-    this._userAgent = null;
 
     this._rGet = promisify(redis.get).bind(redis);
     this._rSet = promisify(redis.set).bind(redis);
+    this._hSet = promisify(redis.hset).bind(redis);
   }
 
   static getBreadcrumSelector() {
@@ -29,7 +29,6 @@ export default class Crawler {
 
   async initialize() {
     this._page = await Page.newPageFromBrowser(this._browser);
-    this._userAgent = this._page.getUserAgent();
 
     const goog =
       "https://www.google.com/search?q=psychologytoday+find+a+ther" +
@@ -39,19 +38,29 @@ export default class Crawler {
     await this._page.goThenWait(BASE);
     await this._page.clickAndWaitForNav(Crawler.getBreadcrumSelector());
 
+    // noinspection JSUnresolvedFunction
     const results = await this._page.do(
-      select =>
-        // noinspection JSUnresolvedFunction
-        $.makeArray($(select)).map(a => a.href),
+      select => $.makeArray($(select)).map(a => a.href),
       "div.result-actions > a"
     );
 
-    const openMap = results.map(async url => {
-      await jitterWait(5000, 5000);
-      return this.openProviderPage(url);
-    });
+    const openMap = [];
+    const len = results.length;
+    for (let i = 0; i < len; i++) {
+      await jitterWait(1000, 1000);
+      openMap.push(this.openProviderPage(results[i]));
+    }
 
     const content = await Promise.all(openMap);
+
+    content.forEach(({ content, url }) => {
+      const tokens = url.split("/");
+      const ptID = tokens[6].split("?")[0];
+      const id = tokens[5] + "/" + ptID;
+
+      console.log(id);
+      this._hSet("pt:providers", id, content);
+    });
 
     await this._page.close();
   }
