@@ -98,23 +98,25 @@ export default class Crawler {
       let count = await this.saveAllProviders();
 
       total += count;
+
       console.log(`${new Date()} - saved ${count} providers (${total})`);
       newURL = await this.clickNext();
-      console.log(`${new Date()} - continuing to ${newURL}`);
 
-      await this._rSet("pt:last-page", newURL);
-      await jitterWait(1000, 1000);
+      // This is the end condition
+      if (newURL == null) {
+        console.log("Seem to have completed scrape, deleting last page key.");
+        await this._rDel(LAST_PAGE_KEY);
+        await this._rDel(CURRENT_SEARCH_COUNTY);
+      } else  {
+        console.log(`${new Date()} - continuing to ${newURL}`);
+        await this._rSet(LAST_PAGE_KEY, newURL);
+        await jitterWait(1000, 1000);
+      }
     } while (newURL && !hardStop);
 
     process.removeListener("SIGINT", sigHandle);
 
     console.log("Complete!");
-
-    if (newURL === null) {
-      console.log("Seem to have completed scrape, deleting last page key.");
-      await this._rDel(LAST_PAGE_KEY);
-      await this._rDel(CURRENT_SEARCH_COUNTY);
-    }
   }
 
   static getCountyBaseURL(county) {
@@ -141,7 +143,7 @@ export default class Crawler {
       return true;
     }
 
-    console.log("Beginning new traversal of", county, "starting with google.");
+    console.log("Beginning new traversal of", county, "county.");
     await this._rSet(CURRENT_SEARCH_COUNTY, county);
 
     const goog =

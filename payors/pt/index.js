@@ -10,7 +10,7 @@ const COUNTIES = [
 
 export async function crawl(browser, redis) {
   const c = new Crawl(browser, redis);
-  await c.initialize("richmond");
+  await c.initialize("kings");
   await c.scan();
   await c.destroy();
 }
