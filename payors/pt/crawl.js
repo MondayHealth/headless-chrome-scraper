@@ -2,11 +2,13 @@ import Page from "../../page";
 import { promisify } from "util";
 import { jitterWait } from "../time-utils";
 
-const BASE = "https://www.psychologytoday.com/us/therapists/ny/new-york";
+const BASE = "https://www.psychologytoday.com/us/therapists/ny/";
 
 const LAST_PAGE_KEY = "pt:last-page";
 
 const PROVIDER_HASH_KEY = "pt:providers";
+
+const CURRENT_SEARCH_COUNTY = "pt:county";
 
 export default class Crawler {
   constructor(browser, redis) {
@@ -15,16 +17,14 @@ export default class Crawler {
 
     this._rGet = promisify(redis.get).bind(redis);
     this._rSet = promisify(redis.set).bind(redis);
+    this._rDel = promisify(redis.del).bind(redis);
     this._hSet = promisify(redis.hset).bind(redis);
-  }
-
-  static getBreadcrumSelector() {
-    return "#geo1 > nav > a.breadcrumb-item.hidden-xs";
   }
 
   async openProviderPage(url) {
     const newPage = await Page.newPageFromBrowser(this._browser);
     await newPage.goThenWait(url);
+    await newPage.waitForSelector("html");
     const content = await newPage.getHTML();
     await jitterWait(1000, 1000);
     await newPage.close();
@@ -65,10 +65,9 @@ export default class Crawler {
       " > div > div.hidden-xs-down > a.btn.btn-default.btn" +
       "-next";
 
-    const next = this._page.$(nextSelector);
-
-    // This is the end of the list condition
-    if (!next) {
+    const nextButton = await this._page.$(nextSelector);
+    if (nextButton === null) {
+      console.log("No 'next' button!");
       return null;
     }
 
@@ -110,24 +109,47 @@ export default class Crawler {
     process.removeListener("SIGINT", sigHandle);
 
     console.log("Complete!");
+
+    if (newURL === null) {
+      console.log("Seem to have completed scrape, deleting last page key.");
+      await this._rDel(LAST_PAGE_KEY);
+      await this._rDel(CURRENT_SEARCH_COUNTY);
+    }
   }
 
-  async initialize() {
+  static getCountyBaseURL(county) {
+    console.assert(county);
+    return BASE + county.replace(" ", "-") + "-county";
+  }
+
+  async initialize(county) {
     this._page = await Page.newPageFromBrowser(this._browser);
 
     const resumeURL = await this._rGet(LAST_PAGE_KEY);
 
     if (resumeURL) {
-      return this._page.goThenWait(resumeURL);
+      const lastCounty = await this._rSet(CURRENT_SEARCH_COUNTY, county);
+      if (lastCounty !== county) {
+        console.warn(
+          "The county being resumed",
+          lastCounty,
+          "is different from the one passed",
+          county
+        );
+      }
+      await this._page.goThenWait(resumeURL);
+      return true;
     }
+
+    console.log("Beginning new traversal of", county, "starting with google.");
+    await this._rSet(CURRENT_SEARCH_COUNTY, county);
 
     const goog =
       "https://www.google.com/search?q=psychologytoday+find+a+ther" +
       "apist+new+york&oq=psychologytoday+find+a+therapist+new+york" +
       "&aqs=chrome..69i57.5820j0j7&sourceid=chrome&ie=UTF-8";
     await this._page.goThenWait(goog);
-    await this._page.goThenWait(BASE);
-
-    return this._page.clickAndWaitForNav(Crawler.getBreadcrumSelector());
+    await this._page.goThenWait(Crawler.getCountyBaseURL(county));
+    return false;
   }
 }
