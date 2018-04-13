@@ -78,6 +78,10 @@ export default class Page {
     return this._page.url();
   }
 
+  async cookies() {
+    return this._page.cookies();
+  }
+
   async setSessionState(newState) {
     return this._page.evaluate(data => {
       for (let key in data) {
