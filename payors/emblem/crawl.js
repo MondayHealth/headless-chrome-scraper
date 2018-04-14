@@ -28,6 +28,8 @@ const PROVIDER_SET = "emblem:providers";
 
 const LAST_SEARCH_KEY = "emblem:last-search";
 
+const NETWORK_SET = "emblem:providers-network";
+
 export default class Crawl {
   constructor(browser, redis) {
     this._browser = browser;
@@ -38,6 +40,7 @@ export default class Crawl {
     this._rGet = promisify(redis.get).bind(redis);
     this._rSet = promisify(redis.set).bind(redis);
     this._rHSet = promisify(redis.hset).bind(redis);
+    this._rHGet = promisify(redis.hget).bind(redis);
   }
 
   getFormData(zip, network, disciplines) {
@@ -230,11 +233,24 @@ export default class Crawl {
     return { uid, npi };
   }
 
-  async saveProvider(name, rawResponse) {
+  async providerTakesNetwork(uid, networkID) {
+    // Save the networks a provider appears in in a separate key
+    const p = await this._rHGet(NETWORK_SET, uid);
+    const networkSet = new Set(p ? JSON.parse(p) : []);
+    networkSet.add(networkID);
+    await this._rHSet(NETWORK_SET, uid, JSON.stringify(Array.from(networkSet)));
+  }
+
+  async saveProvider(name, rawResponse, networkID) {
+    // Save the provider detail data as a unique id
     const result = Crawl.extractProviderDetail(rawResponse);
     result.name = name;
     const { npi, uid } = Crawl.getUniqueID(name, result);
-    const add = await this._rHSet(PROVIDER_SET, uid, JSON.stringify(result));
+
+    const p1 = this._rHSet(PROVIDER_SET, uid, JSON.stringify(result));
+    const p2 = this.providerTakesNetwork(uid, networkID);
+
+    const [add] = await Promise.all([p1, p2]);
     return { npi, add, uid };
   }
 
@@ -271,7 +287,11 @@ export default class Crawl {
             let { name, id } = providers[pID];
             await jitterWait(1000, 1000);
             let detail = await this.doDetailQuery(id);
-            let { npi, add, uid } = await this.saveProvider(name, detail);
+            let { npi, add, uid } = await this.saveProvider(
+              name,
+              detail,
+              networkID
+            );
             console.log(`${new Date()} ${!!add ? "+" : "o"} ${uid}`);
           }
 
