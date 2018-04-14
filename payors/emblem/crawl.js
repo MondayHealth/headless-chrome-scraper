@@ -28,8 +28,6 @@ const PROVIDER_SET = "emblem:providers";
 
 const LAST_SEARCH_KEY = "emblem:last-search";
 
-const MISSED_SET = "emblem:no-npi-value";
-
 export default class Crawl {
   constructor(browser, redis) {
     this._browser = browser;
@@ -226,8 +224,10 @@ export default class Crawl {
       .load(result.data["Address"])
       .text()
       .replace(/\s\s+/g, "");
-    const id = `${npi}:${name.replace(/\s\s+/g, "")}:${address}`;
-    return { id, npi };
+    const uid = `${npi}:${name}:${address}`
+      .replace(/\s/g, "")
+      .replace(/[._\-;,]/g, "");
+    return { uid, npi };
   }
 
   async saveProvider(name, rawResponse) {
@@ -268,16 +268,11 @@ export default class Crawl {
           for (let pID = 0; pID < providerCount; pID++) {
             if (hardStop) break;
 
-            let { name, pageID } = providers[pID];
+            let { name, id } = providers[pID];
             await jitterWait(1000, 1000);
-            let detail = await this.doDetailQuery(pageID);
+            let detail = await this.doDetailQuery(id);
             let { npi, add, uid } = await this.saveProvider(name, detail);
-
-            if (npi < 1) {
-              console.warn(`${new Date()} ! Skipping ${name}`);
-            } else {
-              console.log(`${new Date()} ${!!add ? "+" : "o"} ${uid}`);
-            }
+            console.log(`${new Date()} ${!!add ? "+" : "o"} ${uid}`);
           }
 
           // At the time im writing this, im pretty sure you only have to do
@@ -372,6 +367,8 @@ export default class Crawl {
         this._jsid = value;
       }
     });
+
+    console.log("session id:", this._jsid);
 
     console.assert(this._jsid !== null);
   }
