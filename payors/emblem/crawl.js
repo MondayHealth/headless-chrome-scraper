@@ -1,7 +1,9 @@
 import request from "request";
 import Page from "../../page";
+import cheerio from "cheerio";
 import { jitterWait } from "../time-utils";
 import { ZIP_CODES } from "./ny_zip_codes";
+import { promisify } from "util";
 
 const NETWORKS = [
   "EMBLEM - COMMERCIAL NON HMO 28 COUNTIES ONLY",
@@ -22,12 +24,22 @@ const DISCIPLINES = [
   "EAP,LPN,MDNONPSY,MSN,OTHER,P GROUP,RNA,TCM,UNKNOWN"
 ];
 
+const PROVIDER_SET = "emblem:providers";
+
+const LAST_SEARCH_KEY = "emblem:last-search";
+
+const MISSED_SET = "emblem:no-npi-value";
+
 export default class Crawl {
   constructor(browser, redis) {
     this._browser = browser;
     this._ua = null;
     this._page = null;
     this._jsid = null;
+
+    this._rGet = promisify(redis.get).bind(redis);
+    this._rSet = promisify(redis.set).bind(redis);
+    this._rHSet = promisify(redis.hset).bind(redis);
   }
 
   getFormData(zip, network, disciplines) {
@@ -79,7 +91,7 @@ export default class Crawl {
     return BASE + name + ".do";
   }
 
-  async doQuery(zipID, networkID, disciplineID) {
+  async doListQuery(zipID, networkID, disciplineID) {
     const zipCode = ZIP_CODES[zipID];
     const network = NETWORKS[networkID];
     const disciplines = DISCIPLINES[disciplineID];
@@ -88,7 +100,7 @@ export default class Crawl {
     const gzip = true;
     const url = Crawl.getFunctionURL("providerSearchResults");
 
-    console.debug(`${new Date()} ${zipCode} ${network} ${disciplineID}`);
+    console.log(`${new Date()} - ${zipCode} ${networkID} ${disciplineID}`);
 
     return new Promise((resolve, reject) => {
       request.post({ url, body, headers, gzip }, (e, r, body) => {
@@ -108,18 +120,174 @@ export default class Crawl {
     });
   }
 
-  async scan() {
-    for (let networkID = 0; networkID < NETWORKS.length; networkID++) {
-      for (let discID = 0; discID < DISCIPLINES.length; discID++) {
-        for (let zipID = 0; zipID < ZIP_CODES.length; zipID++) {
-          const response = await this.doQuery(zipID, networkID, discID);
+  async doDetailQuery(id) {
+    const headers = this.getDetailHeaders();
+    const gzip = true;
+    const url = Crawl.getFunctionURL("providerDetails") + `?id=${id}&library=0`;
 
-          console.log(response);
-
+    return new Promise((resolve, reject) => {
+      request({ url, headers, gzip }, (e, r, body) => {
+        if (e) {
+          reject(e);
           return;
+        }
+
+        if (r.statusCode !== 200) {
+          console.error("Req failed:", r.statusCode);
+          reject(body);
+          return;
+        }
+
+        resolve(body);
+      });
+    });
+  }
+
+  extractProvidersFromListing(rawHTML) {
+    const $ = cheerio.load(rawHTML);
+    const extraction = $("tr.regRow div#name_layout a")
+      .map((i, el) => {
+        return {
+          ...el.attribs,
+          name: $(el)
+            .text()
+            .trim()
+        };
+      })
+      .get();
+
+    return extraction.map(elt => {
+      const components = {};
+      elt.href
+        .split("?")[1]
+        .split("&")
+        .map(elt => elt.split("="))
+        .forEach(([key, value]) => (components[key] = value));
+      return { name: elt.name, id: components.id };
+    });
+  }
+
+  static extractProviderDetail(rawHTML) {
+    const $ = cheerio.load(rawHTML);
+
+    // The data are stored in trs which each have two tds
+    const pairs = $("div.panel tr")
+      .map((i, el) => $(el).children("td"))
+      .get();
+
+    const data = {};
+    const noKey = [];
+    pairs.forEach(pair => {
+      const key = $(pair[0])
+        .text()
+        .trim()
+        .replace(":", "")
+        .replace(/\s/g, "");
+      let value = $(pair[1]);
+
+      switch (key) {
+        case "OfficeHours":
+        case "StateLicenses":
+        case "Address":
+        case "Specialty":
+          value = value.html().replace(/\s\s+/g, " ");
+          break;
+        default:
+          value = value
+            .text()
+            .trim()
+            .replace(/\s\s+/g, " ");
+          break;
+      }
+
+      if (key) {
+        data[key] = value;
+      } else if (value) {
+        noKey.push(value);
+      }
+    });
+
+    return { data, noKey };
+  }
+
+  async updateLastSearch(network, discipline, zip) {
+    return this._rSet(LAST_SEARCH_KEY, [network, discipline, zip].join(","));
+  }
+
+  async getLastSearch() {
+    const raw = await this._rGet(LAST_SEARCH_KEY);
+    const [networkID, discID, zipID] = raw ? raw.split(",") : [0, 0, 0];
+    return { networkID, discID, zipID };
+  }
+
+  static getUniqueID(name, result) {
+    const npi = parseInt(result.data["NPIProviderNumber"]) || null;
+    const address = cheerio
+      .load(result.data["Address"])
+      .text()
+      .replace(/\s\s+/g, "");
+    const id = `${npi}:${name.replace(/\s\s+/g, "")}:${address}`;
+    return { id, npi };
+  }
+
+  async saveProvider(name, rawResponse) {
+    const result = Crawl.extractProviderDetail(rawResponse);
+    result.name = name;
+    const { npi, uid } = Crawl.getUniqueID(name, result);
+    const add = await this._rHSet(PROVIDER_SET, uid, JSON.stringify(result));
+    return { npi, add, uid };
+  }
+
+  async scan() {
+    let { networkID, discID, zipID } = await this.getLastSearch();
+
+    console.log(`${new Date()} - Starting ${networkID} ${discID} ${zipID}`);
+
+    let hardStop = false;
+
+    const sigHandle = () => {
+      console.log("Caught SIGTERM! Stopping...");
+      hardStop = true;
+    };
+
+    process.on("SIGINT", sigHandle);
+
+    for (; networkID < NETWORKS.length; networkID++) {
+      if (hardStop) break;
+
+      for (; discID < DISCIPLINES.length; discID++) {
+        if (hardStop) break;
+
+        for (; zipID < ZIP_CODES.length; zipID++) {
+          if (hardStop) break;
+
+          let response = await this.doListQuery(zipID, networkID, discID);
+          let providers = this.extractProvidersFromListing(response);
+          let providerCount = providers.length;
+
+          for (let pID = 0; pID < providerCount; pID++) {
+            if (hardStop) break;
+
+            let { name, pageID } = providers[pID];
+            await jitterWait(1000, 1000);
+            let detail = await this.doDetailQuery(pageID);
+            let { npi, add, uid } = await this.saveProvider(name, detail);
+
+            if (npi < 1) {
+              console.warn(`${new Date()} ! Skipping ${name}`);
+            } else {
+              console.log(`${new Date()} ${!!add ? "+" : "o"} ${uid}`);
+            }
+          }
+
+          // At the time im writing this, im pretty sure you only have to do
+          // this here and not at the end of all three loops...
+          await this.updateLastSearch(networkID, discID, zipID);
         }
       }
     }
+
+    process.removeListener("SIGINT", sigHandle);
   }
 
   getRequestHeaders() {
@@ -138,6 +306,25 @@ export default class Crawl {
       Referer:
         "https://www.valueoptions.com/referralconnect/" +
         "providerSearch.do?nextpage=nextpage",
+      "Upgrade-Insecure-Requests": 1,
+      "User-Agent": this._ua
+    };
+  }
+
+  getDetailHeaders() {
+    return {
+      Accept:
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp," +
+        "image/apng,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9,ja;q=0.8",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      Cookie: "JSESSIONID=" + this._jsid,
+      DNT: 1,
+      Host: "www.valueoptions.com",
+      Pragma: "no-cache",
+      Referer:
+        "https://www.valueoptions.com/referralconnect/providerSearchResults.do",
       "Upgrade-Insecure-Requests": 1,
       "User-Agent": this._ua
     };

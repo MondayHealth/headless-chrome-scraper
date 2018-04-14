@@ -1,5 +1,4 @@
 import puppeteer from "puppeteer";
-import { scanProviders, loadDetail } from "./payors/aetna";
 import redis from "redis";
 import { crawl } from "./payors/emblem";
 
