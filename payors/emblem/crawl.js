@@ -217,7 +217,9 @@ export default class Crawl {
 
   async getLastSearch() {
     const raw = await this._rGet(LAST_SEARCH_KEY);
-    const [networkID, discID, zipID] = raw ? raw.split(",") : [0, 0, 0];
+    const [networkID, discID, zipID] = raw
+      ? raw.split(",").map(e => parseInt(e))
+      : [0, 0, 0];
     return { networkID, discID, zipID };
   }
 
@@ -251,7 +253,7 @@ export default class Crawl {
     const p2 = this.providerTakesNetwork(uid, networkID);
 
     const [add] = await Promise.all([p1, p2]);
-    return { npi, add, uid };
+    return { add, uid };
   }
 
   async scan() {
@@ -287,11 +289,7 @@ export default class Crawl {
             let { name, id } = providers[pID];
             await jitterWait(1000, 1000);
             let detail = await this.doDetailQuery(id);
-            let { npi, add, uid } = await this.saveProvider(
-              name,
-              detail,
-              networkID
-            );
+            let { add, uid } = await this.saveProvider(name, detail, networkID);
             console.log(`${new Date()} ${!!add ? "+" : "o"} ${uid}`);
           }
 
