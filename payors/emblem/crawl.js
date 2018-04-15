@@ -92,6 +92,10 @@ export default class Crawl {
     return BASE + name + ".do";
   }
 
+  log(statement, op) {
+    console.log(`${new Date()} ${op ? op : "-"} ${statement}`);
+  }
+
   async doListQuery(zipID, networkID, disciplineID) {
     const zipCode = ZIP_CODES[zipID];
     const network = NETWORKS[networkID];
@@ -101,7 +105,7 @@ export default class Crawl {
     const gzip = true;
     const url = Crawl.getFunctionURL("providerSearchResults");
 
-    console.log(`${new Date()} - ${zipCode} ${networkID} ${disciplineID}`);
+    this.log(`${zipCode} ${networkID} ${disciplineID}`);
 
     return new Promise((resolve, reject) => {
       request.post({ url, body, headers, gzip }, (e, r, body) => {
@@ -212,15 +216,14 @@ export default class Crawl {
   }
 
   async updateLastSearch(network, discipline, zip) {
-    return this._rSet(LAST_SEARCH_KEY, [network, discipline, zip].join(","));
+    const val = JSON.stringify([network, discipline, zip]);
+    return this._rSet(LAST_SEARCH_KEY, val);
   }
 
   async getLastSearch() {
     const raw = await this._rGet(LAST_SEARCH_KEY);
-    const [networkID, discID, zipID] = raw
-      ? raw.split(",").map(e => parseInt(e))
-      : [0, 0, 0];
-    return { networkID, discID, zipID };
+    const [network, discipline, zip] = raw ? JSON.parse(raw) : [0, 0, 0];
+    return { network, discipline, zip };
   }
 
   static getUniqueID(name, result) {
@@ -257,29 +260,29 @@ export default class Crawl {
   }
 
   async scan() {
-    let { networkID, discID, zipID } = await this.getLastSearch();
+    let { network, discipline, zip } = await this.getLastSearch();
 
-    console.log(`${new Date()} - Starting ${networkID} ${discID} ${zipID}`);
+    this.log(`Starting scan at ${ZIP_CODES[zip]} ${network} ${discipline}`);
 
     let hardStop = false;
 
     const sigHandle = () => {
-      console.log("Caught SIGTERM! Stopping...");
+      console.warn("Caught SIGTERM! Stopping...");
       hardStop = true;
     };
 
     process.on("SIGINT", sigHandle);
 
-    for (; networkID < NETWORKS.length; networkID++) {
+    for (; network < NETWORKS.length; network++) {
       if (hardStop) break;
 
-      for (; discID < DISCIPLINES.length; discID++) {
+      for (; discipline < DISCIPLINES.length; discipline++) {
         if (hardStop) break;
 
-        for (; zipID < ZIP_CODES.length; zipID++) {
+        for (; zip < ZIP_CODES.length; zip++) {
           if (hardStop) break;
 
-          let response = await this.doListQuery(zipID, networkID, discID);
+          let response = await this.doListQuery(zip, network, discipline);
           let providers = this.extractProvidersFromListing(response);
           let providerCount = providers.length;
 
@@ -289,15 +292,19 @@ export default class Crawl {
             let { name, id } = providers[pID];
             await jitterWait(1000, 1000);
             let detail = await this.doDetailQuery(id);
-            let { add, uid } = await this.saveProvider(name, detail, networkID);
-            console.log(`${new Date()} ${!!add ? "+" : "o"} ${uid}`);
+            let { add, uid } = await this.saveProvider(name, detail, network);
+
+            // Keep track of when and how something was added
+            this.log(uid, !!add ? "+" : "o");
           }
 
           // At the time im writing this, im pretty sure you only have to do
           // this here and not at the end of all three loops...
-          await this.updateLastSearch(networkID, discID, zipID);
+          await this.updateLastSearch(network, discipline, zip);
         }
+        zip = 0;
       }
+      discipline = 0;
     }
 
     process.removeListener("SIGINT", sigHandle);
@@ -386,7 +393,7 @@ export default class Crawl {
       }
     });
 
-    console.log("session id:", this._jsid);
+    this.log("session id: " + this._jsid);
 
     console.assert(this._jsid !== null);
   }
