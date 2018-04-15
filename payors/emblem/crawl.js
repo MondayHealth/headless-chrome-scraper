@@ -42,8 +42,6 @@ const LAST_SEARCH_KEY = "emblem:last-search";
 
 const NETWORK_SET = "emblem:providers-network";
 
-const EMPTY_RESULT_THRESHOLD = 8;
-
 export default class Crawl {
   constructor(browser, redis) {
     this._browser = browser;
@@ -57,6 +55,8 @@ export default class Crawl {
     this._rHGet = promisify(redis.hget).bind(redis);
 
     this._listRequests = [];
+
+    this._networkID = null;
   }
 
   getFormData(zip, network, disciplines) {
@@ -115,7 +115,9 @@ export default class Crawl {
   async drainQueue(queue, queueDistance, max) {
     let backoffTime = queueDistance / 8;
     while (queue.length >= max) {
-      Crawl.log(`Too many requests. Backing off ${backoffTime/1000} seconds.`);
+      Crawl.log(
+        `Too many requests. Backing off ${backoffTime / 1000} seconds.`
+      );
       await wait(backoffTime);
       backoffTime *= 2;
       let now = new Date();
@@ -262,6 +264,12 @@ export default class Crawl {
       }
     });
 
+    if (Object.entries(data).length < 4) {
+      console.error(`${new Date()} ! Seemingly empty provider detail`);
+      console.log(rawHTML);
+      process.exit();
+    }
+
     return { data, noKey };
   }
 
@@ -327,6 +335,8 @@ export default class Crawl {
     for (; network < NETWORKS.length; network++) {
       if (hardStop) break;
 
+      await this.setNetwork(network);
+
       for (; discipline < DISCIPLINES.length; discipline++) {
         if (hardStop) break;
 
@@ -361,6 +371,8 @@ export default class Crawl {
     }
 
     process.removeListener("SIGINT", sigHandle);
+
+    Crawl.log("Scan complete!");
   }
 
   getRequestHeaders() {
@@ -403,7 +415,15 @@ export default class Crawl {
     };
   }
 
-  async initialize(networkID) {
+  async setNetwork(nid) {
+    console.assert(nid >= 0);
+
+    if (nid === this._networkID) {
+      return;
+    }
+
+    Crawl.log(`Changing to network "${NETWORKS[nid]}"`);
+
     if (this._page) {
       Crawl.log("Page already open, closing...");
       await this._page.close();
@@ -430,7 +450,7 @@ export default class Crawl {
     // noinspection JSUnresolvedFunction
     await this._page.do(({ sel, val }) => $(sel).val(val), {
       sel,
-      val: networkList[NETWORKS[networkID || 0]]
+      val: networkList[NETWORKS[nid]]
     });
 
     await this._page.clickAndWaitForNav("#go");
@@ -451,8 +471,10 @@ export default class Crawl {
       }
     });
 
-    Crawl.log("session id: " + this._jsid);
+    Crawl.log("Session id: " + this._jsid);
 
     console.assert(this._jsid !== null);
+
+    this._networkID = nid;
   }
 }
