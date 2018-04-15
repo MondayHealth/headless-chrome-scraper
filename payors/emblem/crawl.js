@@ -1,7 +1,7 @@
 import request from "request";
 import Page from "../../page";
 import cheerio from "cheerio";
-import { jitterWait } from "../time-utils";
+import { jitterWait, wait } from "../time-utils";
 import { ZIP_CODES } from "./ny_zip_codes";
 import { promisify } from "util";
 
@@ -24,11 +24,25 @@ const DISCIPLINES = [
   "EAP,LPN,MDNONPSY,MSN,OTHER,P GROUP,RNA,TCM,UNKNOWN"
 ];
 
+const DISCIPLINE_NAMES = [
+  "Applied behavior Analyst",
+  "Counselor, Master's Level",
+  "Psychologist, Doctoral Level",
+  "Psychologist, Master's Level",
+  "Psychiatrist & Medical Doctor",
+  "prescribing psychologists",
+  "Nurses w/ Prescriptive Authority",
+  "NOP Clinic / MH Center",
+  "Other"
+];
+
 const PROVIDER_SET = "emblem:providers";
 
 const LAST_SEARCH_KEY = "emblem:last-search";
 
 const NETWORK_SET = "emblem:providers-network";
+
+const EMPTY_RESULT_THRESHOLD = 8;
 
 export default class Crawl {
   constructor(browser, redis) {
@@ -41,6 +55,8 @@ export default class Crawl {
     this._rSet = promisify(redis.set).bind(redis);
     this._rHSet = promisify(redis.hset).bind(redis);
     this._rHGet = promisify(redis.hget).bind(redis);
+
+    this._listRequests = [];
   }
 
   getFormData(zip, network, disciplines) {
@@ -92,8 +108,21 @@ export default class Crawl {
     return BASE + name + ".do";
   }
 
-  log(statement, op) {
+  static log(statement, op) {
     console.log(`${new Date()} ${op ? op : "-"} ${statement}`);
+  }
+
+  async drainQueue(queue, queueDistance, max) {
+    let backoffTime = queueDistance / 8;
+    while (queue.length >= max) {
+      Crawl.log(`Too many requests. Backing off ${backoffTime/1000} seconds.`);
+      await wait(backoffTime);
+      backoffTime *= 2;
+      let now = new Date();
+      queue = queue.filter(req => now - req < queueDistance);
+    }
+
+    return queue;
   }
 
   async doListQuery(zipID, networkID, disciplineID) {
@@ -105,7 +134,13 @@ export default class Crawl {
     const gzip = true;
     const url = Crawl.getFunctionURL("providerSearchResults");
 
-    this.log(`${zipCode} ${networkID} ${disciplineID}`);
+    Crawl.log(
+      `${networkID} ${zipCode} (${zipID}) ${DISCIPLINE_NAMES[disciplineID]}`
+    );
+
+    // If you do this more then ~10 times per minute you get a spam block
+    this._listRequests = await this.drainQueue(this._listRequests, 60000, 10);
+    this._listRequests.push(new Date());
 
     return new Promise((resolve, reject) => {
       request.post({ url, body, headers, gzip }, (e, r, body) => {
@@ -128,17 +163,17 @@ export default class Crawl {
   async doDetailQuery(id) {
     const headers = this.getDetailHeaders();
     const gzip = true;
-    const url = Crawl.getFunctionURL("providerDetails") + `?id=${id}&library=0`;
+    const url = `${Crawl.getFunctionURL("providerDetails")}?id=${id}&library=0`;
 
     return new Promise((resolve, reject) => {
-      request({ url, headers, gzip }, (e, r, body) => {
-        if (e) {
-          reject(e);
+      request({ url, headers, gzip }, (error, response, body) => {
+        if (error) {
+          reject(error);
           return;
         }
 
-        if (r.statusCode !== 200) {
-          console.error("Req failed:", r.statusCode);
+        if (response.statusCode !== 200) {
+          console.error("Req failed:", response.statusCode);
           reject(body);
           return;
         }
@@ -161,7 +196,7 @@ export default class Crawl {
       })
       .get();
 
-    return extraction.map(elt => {
+    const ret = extraction.map(elt => {
       const components = {};
       elt.href
         .split("?")[1]
@@ -170,6 +205,21 @@ export default class Crawl {
         .forEach(([key, value]) => (components[key] = value));
       return { name: elt.name, id: components.id };
     });
+
+    if (!ret.length) {
+      const text = $("#providerSearchForm").text();
+      if (text.indexOf("providers found") < 0) {
+        if (rawHTML.indexOf("automated program has been detected")) {
+          console.error(`${new Date()} !! CAPCHA BLOCK`);
+          process.exit();
+        }
+        console.error("!! No results page doesn't look normal!");
+        console.log(rawHTML);
+        process.exit();
+      }
+    }
+
+    return ret;
   }
 
   static extractProviderDetail(rawHTML) {
@@ -228,14 +278,15 @@ export default class Crawl {
 
   static getUniqueID(name, result) {
     const npi = parseInt(result.data["NPIProviderNumber"]) || null;
+
     const address = cheerio
       .load(result.data["Address"])
       .text()
       .replace(/\s\s+/g, "");
-    const uid = `${npi}:${name}:${address}`
+
+    return `${npi}:${name}:${address}`
       .replace(/\s/g, "")
       .replace(/[._\-;,]/g, "");
-    return { uid, npi };
   }
 
   async providerTakesNetwork(uid, networkID) {
@@ -250,7 +301,7 @@ export default class Crawl {
     // Save the provider detail data as a unique id
     const result = Crawl.extractProviderDetail(rawResponse);
     result.name = name;
-    const { npi, uid } = Crawl.getUniqueID(name, result);
+    const uid = Crawl.getUniqueID(name, result);
 
     const p1 = this._rHSet(PROVIDER_SET, uid, JSON.stringify(result));
     const p2 = this.providerTakesNetwork(uid, networkID);
@@ -262,7 +313,7 @@ export default class Crawl {
   async scan() {
     let { network, discipline, zip } = await this.getLastSearch();
 
-    this.log(`Starting scan at ${ZIP_CODES[zip]} ${network} ${discipline}`);
+    Crawl.log(`Starting scan at ${ZIP_CODES[zip]} ${network} ${discipline}`);
 
     let hardStop = false;
 
@@ -295,12 +346,14 @@ export default class Crawl {
             let { add, uid } = await this.saveProvider(name, detail, network);
 
             // Keep track of when and how something was added
-            this.log(uid, !!add ? "+" : "o");
+            Crawl.log(uid, !!add ? "+" : "o");
           }
 
           // At the time im writing this, im pretty sure you only have to do
           // this here and not at the end of all three loops...
           await this.updateLastSearch(network, discipline, zip);
+
+          await jitterWait(500, 500);
         }
         zip = 0;
       }
@@ -350,7 +403,12 @@ export default class Crawl {
     };
   }
 
-  async initialize() {
+  async initialize(networkID) {
+    if (this._page) {
+      Crawl.log("Page already open, closing...");
+      await this._page.close();
+    }
+
     const firstURL = Crawl.getFunctionURL("providerDirectory");
     this._page = await Page.newPageFromBrowser(this._browser);
     this._ua = this._page.getUserAgent();
@@ -372,7 +430,7 @@ export default class Crawl {
     // noinspection JSUnresolvedFunction
     await this._page.do(({ sel, val }) => $(sel).val(val), {
       sel,
-      val: networkList[NETWORKS[0]]
+      val: networkList[NETWORKS[networkID || 0]]
     });
 
     await this._page.clickAndWaitForNav("#go");
@@ -393,7 +451,7 @@ export default class Crawl {
       }
     });
 
-    this.log("session id: " + this._jsid);
+    Crawl.log("session id: " + this._jsid);
 
     console.assert(this._jsid !== null);
   }
