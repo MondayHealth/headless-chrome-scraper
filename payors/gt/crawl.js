@@ -1,18 +1,40 @@
 import Page from "../../page";
 import { l } from "../log";
 import { jitterWait } from "../time-utils";
+import { promisify } from "util";
 
 const BASE =
   "https://www.goodtherapy.org/newsearch/search.html?search[stateid]=1";
+
+const PROVIER_BASE = "https://www.goodtherapy.org/therapists/profile/";
+
+const PROVIDER_KEY = "gt:providers";
+
+const PREVIOUS_SEARCH = "gt:last-page";
 
 export class Crawl {
   constructor(browser, redis) {
     this._browser = browser;
     this._page = null;
+
+    this._rGet = promisify(redis.get).bind(redis);
+    this._rDel = promisify(redis.del).bind(redis);
+    this._rSet = promisify(redis.set).bind(redis);
+    this._rHSet = promisify(redis.hset).bind(redis);
+    this._rHGet = promisify(redis.hget).bind(redis);
   }
 
   static nextButtonSelector() {
     return "#resultsDiv > table:nth-child(6) > tbody > tr > td:nth-child(2) > a";
+  }
+
+  async getDetail(uid) {
+    const page = await Page.newPageFromBrowser(this._browser);
+    const selector = "div.page_content_main_container";
+    await page.goThenWait(PROVIER_BASE + uid);
+    const content = await page.do(sel => $(sel).html(), selector);
+    const result = this._rHSet(PROVIDER_KEY, uid, content);
+    l(`${uid} (${content.length})`, !!result ? "+" : "o");
   }
 
   async scrapeProvidersOnCurrentPage() {
@@ -27,27 +49,20 @@ export class Crawl {
       );
     });
 
-    /**
-     * Make this request
-     *
-     * :authority: www.goodtherapy.org
-     :method: GET
-     :path: /therapists/profile/natalie-ludewig-20161022
-     :scheme: https
-     accept: text/html,application/xhtml+xml,application/xml;q (get full thing)
-    accept-encoding: gzip, deflate, br
-    accept-language: en-US,en;q=0.9,ja;q=0.8
-    cache-control: no-cache
-    cookie: PHPSESSID=74d03e038a6956e60f9dda63700c49f7; GTVisitor=285439525821
-    dnt: 1
-    pragma: no-cache
-    referer: https://www.goodtherapy.org/newsearch/search.html?search[stateid]=1
-      upgrade-insecure-requests: 1
-    user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/65.0.3325.181 Safari/537.36
-     *
-     */
+    const len = hrefs.length;
+    for (let i = 0; i < len; i++) {
+      await this.getDetail(hrefs[i].split("/").pop());
+      await jitterWait(1000,1000);
+    }
+  }
 
-    console.log(hrefs);
+  async restoreSearchPosition() {
+    const previous = await this._rGet(PREVIOUS_SEARCH);
+    return this._page.goThenWait(previous ? previous : BASE);
+  }
+
+  async saveSearchPosition() {
+    return this._rSet(PREVIOUS_SEARCH, this._page.url());
   }
 
   async scan() {
@@ -66,22 +81,28 @@ export class Crawl {
     l("Starting new New York search");
 
     this._page = await Page.newPageFromBrowser(this._browser);
-    await this._page.goThenWait(BASE);
+    this._ua = this._page.getUserAgent();
+    await this.restoreSearchPosition();
 
     let nextButton = null;
 
     do {
+      // If anything after this fails, we want to resume here
+      await this.saveSearchPosition();
+
       // Do the actual work
       await this.scrapeProvidersOnCurrentPage();
 
-      await jitterWait(250000, 2500);
+      // Give it a second
+      await jitterWait(1000,1000);
 
       nextButton = await this._page.$(Crawl.nextButtonSelector());
 
       if (nextButton) {
         await this._page.clickAndWaitForNav(Crawl.nextButtonSelector());
       } else {
-        l("No next button found");
+        l("No next button found. Deleting search state.");
+        await this._rDel(PREVIOUS_SEARCH);
       }
     } while (nextButton && !hardStop);
 
