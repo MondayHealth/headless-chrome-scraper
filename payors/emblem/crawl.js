@@ -141,7 +141,7 @@ export default class Crawl {
     );
 
     // If you do this more then ~10 times per minute you get a spam block
-    this._listRequests = await this.drainQueue(this._listRequests, 60000, 10);
+    this._listRequests = await this.drainQueue(this._listRequests, 65000, 10);
     this._listRequests.push(new Date());
 
     return new Promise((resolve, reject) => {
