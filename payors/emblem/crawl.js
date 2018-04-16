@@ -4,6 +4,7 @@ import cheerio from "cheerio";
 import { jitterWait, wait } from "../time-utils";
 import { ZIP_CODES } from "./ny_zip_codes";
 import { promisify } from "util";
+import { l } from "../log";
 
 const NETWORKS = [
   "EMBLEM - COMMERCIAL NON HMO 28 COUNTIES ONLY",
@@ -108,16 +109,10 @@ export default class Crawl {
     return BASE + name + ".do";
   }
 
-  static log(statement, op) {
-    console.log(`${new Date()} ${op ? op : "-"} ${statement}`);
-  }
-
   async drainQueue(queue, queueDistance, max) {
     let backoffTime = queueDistance / 8;
     while (queue.length >= max) {
-      Crawl.log(
-        `Too many requests. Backing off ${backoffTime / 1000} seconds.`
-      );
+      l(`Too many requests. Backing off ${backoffTime / 1000} seconds.`);
       await wait(backoffTime);
       backoffTime *= 2;
       let now = new Date();
@@ -136,9 +131,7 @@ export default class Crawl {
     const gzip = true;
     const url = Crawl.getFunctionURL("providerSearchResults");
 
-    Crawl.log(
-      `${networkID} ${zipCode} (${zipID}) ${DISCIPLINE_NAMES[disciplineID]}`
-    );
+    l(`${networkID} ${zipCode} (${zipID}) ${DISCIPLINE_NAMES[disciplineID]}`);
 
     // If you do this more then ~10 times per minute you get a spam block
     this._listRequests = await this.drainQueue(this._listRequests, 60000, 10);
@@ -321,7 +314,7 @@ export default class Crawl {
   async scan() {
     let { network, discipline, zip } = await this.getLastSearch();
 
-    Crawl.log(`Starting scan at ${ZIP_CODES[zip]} ${network} ${discipline}`);
+    l(`Starting scan at ${ZIP_CODES[zip]} ${network} ${discipline}`);
 
     let hardStop = false;
 
@@ -356,7 +349,7 @@ export default class Crawl {
             let { add, uid } = await this.saveProvider(name, detail, network);
 
             // Keep track of when and how something was added
-            Crawl.log(uid, !!add ? "+" : "o");
+            l(uid, !!add ? "+" : "o");
           }
 
           // At the time im writing this, im pretty sure you only have to do
@@ -372,7 +365,7 @@ export default class Crawl {
 
     process.removeListener("SIGINT", sigHandle);
 
-    Crawl.log("Scan complete!");
+    l("Scan complete!");
   }
 
   getRequestHeaders() {
@@ -422,10 +415,10 @@ export default class Crawl {
       return;
     }
 
-    Crawl.log(`Changing to network "${NETWORKS[nid]}"`);
+    l(`Changing to network "${NETWORKS[nid]}"`);
 
     if (this._page) {
-      Crawl.log("Page already open, closing...");
+      l("Page already open, closing...");
       await this._page.close();
     }
 
@@ -471,7 +464,7 @@ export default class Crawl {
       }
     });
 
-    Crawl.log("Session id: " + this._jsid);
+    l("Session id: " + this._jsid);
 
     console.assert(this._jsid !== null);
 
