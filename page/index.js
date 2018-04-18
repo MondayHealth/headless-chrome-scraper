@@ -1,3 +1,5 @@
+import devices from "puppeteer/DeviceDescriptors";
+
 let userAgent = null;
 
 async function getCachedUserAgent(browser) {
@@ -29,6 +31,10 @@ export default class Page {
     if (verbose) {
       this._page.on("console", msg => console.log(msg));
     }
+  }
+
+  async iPhone() {
+    return this._page.emulate(devices["iPhone 6"]);
   }
 
   getUserAgent() {
@@ -68,12 +74,6 @@ export default class Page {
     await p.close();
   }
 
-  debugNavigation() {
-    this._page.on("framenavigated", () => {
-      console.log("NAV", this._page.url());
-    });
-  }
-
   url() {
     return this._page.url();
   }
@@ -82,14 +82,38 @@ export default class Page {
     return this._page.cookies();
   }
 
+  async setCookies(cookies) {
+    return Promise.all(cookies.map(cookie => this._page.setCookie(cookie)));
+  }
+
   async setSessionState(newState) {
     return this._page.evaluate(data => {
       for (let key in data) {
         // noinspection JSUnresolvedVariable
         sessionStorage.setItem(key, data[key]);
       }
+      // noinspection JSUnresolvedVariable
       return sessionStorage;
     }, newState);
+  }
+
+  async setLocalStorage(newState) {
+    return this._page.evaluate(data => {
+      for (let key in data) {
+        // noinspection JSUnresolvedVariable
+        localStorage.setItem(key, data[key]);
+      }
+    });
+  }
+
+  async getLocalStorageAsJSON() {
+    // noinspection JSUnresolvedVariable
+    return this.do(() => JSON.stringify(localStorage));
+  }
+
+  async getSessionStateAsJSON() {
+    // noinspection JSUnresolvedVariable
+    return this.do(() => JSON.stringify(sessionStorage));
   }
 
   async waitForSelector(selector) {
@@ -111,6 +135,11 @@ export default class Page {
   async type(selector, input) {
     await this._page.waitForSelector(selector);
     return this._page.type(selector, input, { delay: 100 });
+  }
+
+  async href() {
+    // noinspection JSUnresolvedVariable
+    return this.do(() => document.location.href);
   }
 
   async clickAndWaitForNav(select, delay) {
