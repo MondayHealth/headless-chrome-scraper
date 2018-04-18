@@ -229,7 +229,7 @@ export default class UnitedCrawl {
 
     await jitterWait(2000, 500);
 
-    let snoopSearch = this.catchSearchResult();
+    const snoopSearch = this.catchSearchResult();
 
     const typeSelector = `a[track="${this.currentProviderType()}"]`;
     await this._page.waitForSelector(typeSelector);

@@ -79,13 +79,19 @@ export default class OxfordCrawl extends UnitedCrawl {
 
     const buttonSelector = `button[track="${providerType}"]`;
     await this._page.waitForSelector(buttonSelector);
+
+    const snoopSearch = this.catchSearchResult();
+
     await jitterWait(150, 100);
     await this._page.click(buttonSelector);
+
+    return await snoopSearch;
   }
 
   async crawl() {
+    await this.loadPlanIndex();
+
     while (this._planIndex < OxfordCrawl.plans().length) {
-      await this.loadPlanIndex();
       l(`Beginning crawl for oxford plan ${this.currentPlan()}`);
       await super.crawl();
       await this.storePlanIndex(this._planIndex + 1);
