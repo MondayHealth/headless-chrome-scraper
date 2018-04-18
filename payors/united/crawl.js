@@ -66,13 +66,18 @@ export default class UnitedCrawl {
     return `${HOST}/plans/${this.baseURLAbbreviation()}`;
   }
 
+  coverageType() {
+    return "behavioral";
+  }
+
   detailPath(searchID) {
     return (
       "/rest/provider/v2/partners/" +
       this.payorAbbreviation() +
       "/providerTypes/person/providers/" +
       searchID +
-      "?coverageType=behavioral"
+      "?coverageType=" +
+      this.coverageType()
     );
   }
 

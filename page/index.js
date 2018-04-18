@@ -127,9 +127,9 @@ export default class Page {
     return this._page.click(selector, { delay: delay || 100 });
   }
 
-  async type(selector, input) {
+  async type(selector, input, delay) {
     await this._page.waitForSelector(selector);
-    return this._page.type(selector, input, { delay: 100 });
+    return this._page.type(selector, input, { delay: delay || 100 });
   }
 
   async href() {
