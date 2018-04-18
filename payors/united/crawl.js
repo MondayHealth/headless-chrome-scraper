@@ -192,6 +192,13 @@ export default class UnitedCrawl {
   async nextPage() {
     const selector = 'button[track="next-page"]';
 
+    const button = await this._page.$(selector);
+
+    if (!button) {
+      l("Could not find next button. This probably means the end.");
+      return null;
+    }
+
     const disabled = await this._page.do(
       selector => document.querySelector(selector).attributes.disabled,
       selector
