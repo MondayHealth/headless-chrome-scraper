@@ -1,53 +1,13 @@
-/**
- *
- *
-
- COMMERCIAL
- URL: https://connect.werally.com/plans/uhc
- How to navigate:
- Select Mental Health Directory
- Change Location to New York, NY
- Click to search by “People” à “Provider Type” for the following provider types:
- ...
- After clicking plan, update radius to “10 miles”
- Fields to be captured:
- Provider Name
- Provider Type (selected earlier)
- License (it’s attached to the end of the name field, e.g. LCSW, PhD)
- Address
- Phone
- Accepting New Patients (Y/N)
- Coverage/Plan Type: “Commercial”
- */
-
 import Page from "../../page";
 import { jitterWait } from "../time-utils";
 import { l } from "../log";
 import { promisify } from "util";
 import Http2Client from "../http2-util";
 
-const UHC_BASE = "https://connect.werally.com/plans/uhc";
-
 const HOST = "https://connect.werally.com";
-
 const AUTHORITY = "connect.werally.com";
 
-const UHC_DETAIL_PATH =
-  "/rest/provider/v2/partners/uhc/providerTypes/person/providers/";
-
-export const PROVIDER_TYPES = [
-  "Psychiatrist (Physician)",
-  "Psychologist",
-  "Master Level Clinician",
-  "Nurse Masters Level",
-  "Telemental Health Providers"
-];
-
-const SEARCH_STATE_KEY = "united:search-state";
-
-const PROVIDER_KEY = "united:providers";
-
-export default class Crawl {
+export default class UnitedCrawl {
   constructor(browser, redis) {
     this._browser = browser;
     this._page = null;
@@ -57,8 +17,6 @@ export default class Crawl {
 
     this._client = null;
 
-    this._rGet = promisify(redis.get).bind(redis);
-    this._rSet = promisify(redis.set).bind(redis);
     this._rHSet = promisify(redis.hset).bind(redis);
     this._rHGet = promisify(redis.hget).bind(redis);
 
@@ -68,6 +26,54 @@ export default class Crawl {
     };
 
     process.on("SIGINT", this._sigHandle);
+  }
+
+  baseURLAbbreviation() {
+    return "uhc";
+  }
+
+  payorAbbreviation() {
+    return "uhc";
+  }
+
+  payorName() {
+    return "united";
+  }
+
+  providerTypes() {
+    return [
+      "Psychiatrist (Physician)",
+      "Psychologist",
+      "Master Level Clinician",
+      "Nurse Masters Level",
+      "Telemental Health Providers"
+    ];
+  }
+
+  searchStateKey() {
+    return this.payorName() + ":search-state";
+  }
+
+  providerKey() {
+    return this.payorName() + ":providers";
+  }
+
+  currentProviderType() {
+    return this.providerTypes()[this._providerTypeIndex];
+  }
+
+  baseURL() {
+    return `${HOST}/plans/${this.baseURLAbbreviation()}`;
+  }
+
+  detailPath(searchID) {
+    return (
+      "/rest/provider/v2/partners/" +
+      this.payorAbbreviation() +
+      "/providerTypes/person/providers/" +
+      searchID +
+      "?coverageType=behavioral"
+    );
   }
 
   async destroy() {
@@ -106,57 +112,60 @@ export default class Crawl {
     const sessionStorage = await this._page.getSessionStateAsJSON();
     const localStorage = await this._page.getLocalStorageAsJSON();
     const cookies = JSON.stringify(await this._page.cookies());
-    // noinspection JSUnresolvedVariable
     const url = await this._page.href();
 
+    const key = this.searchStateKey();
+
     return Promise.all([
-      this._rHSet(SEARCH_STATE_KEY, "session", sessionStorage),
-      this._rHSet(SEARCH_STATE_KEY, "local", localStorage),
-      this._rHSet(SEARCH_STATE_KEY, "cookies", cookies),
-      this._rHSet(SEARCH_STATE_KEY, "url", url),
-      this._rHSet(SEARCH_STATE_KEY, "providerIndex", this._providerTypeIndex)
+      this._rHSet(key, "session", sessionStorage),
+      this._rHSet(key, "local", localStorage),
+      this._rHSet(key, "cookies", cookies),
+      this._rHSet(key, "url", url),
+      this._rHSet(key, "providerIndex", this._providerTypeIndex)
     ]);
   }
 
   async previousSearchStateExists() {
-    return !!(await this._rHGet(SEARCH_STATE_KEY, "url"));
+    return !!(await this._rHGet(this.searchStateKey(), "url"));
   }
 
   async reloadProviderTypeIndex() {
-    const typeIndex = await this._rHGet(SEARCH_STATE_KEY, "providerIndex");
+    const typeIndex = await this._rHGet(this.searchStateKey(), "providerIndex");
     this._providerTypeIndex = !!typeIndex ? parseInt(typeIndex) : 0;
   }
 
   async setNewProviderSearchIndex(newIndex) {
     console.assert(newIndex >= 0);
-    console.assert(newIndex <= PROVIDER_TYPES.length);
 
-    if (newIndex === PROVIDER_TYPES.length) {
+    const providerTypeCount = this.providerTypes().length;
+
+    console.assert(newIndex <= providerTypeCount);
+
+    this._providerTypeIndex = newIndex;
+
+    if (newIndex === providerTypeCount) {
       l(`Provider rolled over.`);
       return;
     }
 
-    this._providerTypeIndex = newIndex;
+    l(`Provider type updated to ${this.currentProviderType()}`);
 
-    l(`Provider type updated to ${PROVIDER_TYPES[newIndex]}`);
+    const key = this.searchStateKey();
 
     return Promise.all([
-      this._rHSet(SEARCH_STATE_KEY, "url", ""),
-      this._rHSet(SEARCH_STATE_KEY, "providerIndex", newIndex)
+      this._rHSet(key, "url", ""),
+      this._rHSet(key, "providerIndex", newIndex)
     ]);
   }
 
   async loadSearchPosition() {
-    const [
-      sessionStorage,
-      localStorage,
-      url,
-      cookies
-    ] = await Promise.all([
-      this._rHGet(SEARCH_STATE_KEY, "session"),
-      this._rHGet(SEARCH_STATE_KEY, "local"),
-      this._rHGet(SEARCH_STATE_KEY, "url"),
-      this._rHGet(SEARCH_STATE_KEY, "cookies")
+    const key = this.searchStateKey();
+
+    const [sessionStorage, localStorage, url, cookies] = await Promise.all([
+      this._rHGet(key, "session"),
+      this._rHGet(key, "local"),
+      this._rHGet(key, "url"),
+      this._rHGet(key, "cookies")
     ]);
 
     if (!url) {
@@ -217,9 +226,7 @@ export default class Crawl {
 
     let snoopSearch = this.catchSearchResult();
 
-    const typeSelector = `a[track="${
-      PROVIDER_TYPES[this._providerTypeIndex]
-    }"]`;
+    const typeSelector = `a[track="${this.currentProviderType()}"]`;
     await this._page.waitForSelector(typeSelector);
     await this._page.click(typeSelector);
 
@@ -232,7 +239,7 @@ export default class Crawl {
       "accept-encoding": "gzip, deflate, br",
       "accept-language": "en",
       "cache-control": "no-cache",
-      "context-config-partnerid": "uhc",
+      "context-config-partnerid": this.payorAbbreviation(),
       dnt: 1,
       pragma: "no-cache",
       // @TODO: This is where cookies would go, but its unclear if they should.
@@ -244,9 +251,8 @@ export default class Crawl {
   }
 
   async getProviderDetail(id, referrer) {
-    const url = UHC_DETAIL_PATH + id + "?coverageType=behavioral";
     const headers = this.getDetailHeaders(referrer);
-    const raw = await this._client.req(url, headers);
+    const raw = await this._client.req(this.detailPath(id), headers);
 
     if (raw.length < 100) {
       console.error("Short provider detail", raw);
@@ -257,8 +263,10 @@ export default class Crawl {
 
   async saveProviderData(uid, list, detail) {
     const json = JSON.stringify({ list, detail });
-    const added = await this._rHSet(PROVIDER_KEY, uid, json);
+    const added = await this._rHSet(this.providerKey(), uid, json);
     const name = list.name;
+
+    // noinspection JSUnresolvedVariable
     l(`${name.first} ${name.last}, ${name.degree}`, !!added ? "+" : "o");
   }
 
@@ -290,7 +298,7 @@ export default class Crawl {
     // Put this in the right place
     this._page = await Page.newPageFromBrowser(this._browser);
     this._ua = this._page.getUserAgent();
-    await this._page.goThenWait(UHC_BASE);
+    await this._page.goThenWait(this.baseURL());
 
     await jitterWait(5000, 1000);
 
@@ -301,7 +309,7 @@ export default class Crawl {
     if (shouldResume) {
       result = await this.loadSearchPosition();
     } else {
-      const providerType = PROVIDER_TYPES[this._providerTypeIndex];
+      const providerType = this.currentProviderType();
       l("Starting new search for provider type " + providerType);
       result = await this.newSearch(providerType);
     }
@@ -325,9 +333,9 @@ export default class Crawl {
   async crawl() {
     await this.reloadProviderTypeIndex();
 
-    l(`Beginning crawl for ${PROVIDER_TYPES[this._providerTypeIndex]}`);
+    l(`Beginning crawl for ${this.currentProviderType()}`);
 
-    while (this._providerTypeIndex < PROVIDER_TYPES.length) {
+    while (this._providerTypeIndex < this.providerTypes().length) {
       await this.scanCurrentProviderType();
       await this.setNewProviderSearchIndex(this._providerTypeIndex + 1);
     }
