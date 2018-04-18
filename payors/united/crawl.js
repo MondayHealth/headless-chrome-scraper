@@ -35,7 +35,7 @@ const AUTHORITY = "connect.werally.com";
 const UHC_DETAIL_PATH =
   "/rest/provider/v2/partners/uhc/providerTypes/person/providers/";
 
-const PROVIDER_TYPES = [
+export const PROVIDER_TYPES = [
   "Psychiatrist (Physician)",
   "Psychologist",
   "Master Level Clinician",
@@ -53,6 +53,7 @@ export default class Crawl {
     this._page = null;
     this._ua = null;
     this._xsrfToken = null;
+    this._providerTypeIndex = 0;
 
     this._client = null;
 
@@ -60,6 +61,27 @@ export default class Crawl {
     this._rSet = promisify(redis.set).bind(redis);
     this._rHSet = promisify(redis.hset).bind(redis);
     this._rHGet = promisify(redis.hget).bind(redis);
+
+    this._sigHandle = async () => {
+      console.warn("Caught SIGTERM! Stopping...");
+      process.exit();
+    };
+
+    process.on("SIGINT", this._sigHandle);
+  }
+
+  async destroy() {
+    process.removeListener("SIGINT", this._sigHandle);
+
+    if (this._page) {
+      await this._page.close();
+      this._page = null;
+    }
+
+    if (this._client) {
+      this._client.dispose();
+      this._client = null;
+    }
   }
 
   async catchSearchResult() {
@@ -91,7 +113,8 @@ export default class Crawl {
       this._rHSet(SEARCH_STATE_KEY, "session", sessionStorage),
       this._rHSet(SEARCH_STATE_KEY, "local", localStorage),
       this._rHSet(SEARCH_STATE_KEY, "cookies", cookies),
-      this._rHSet(SEARCH_STATE_KEY, "url", url)
+      this._rHSet(SEARCH_STATE_KEY, "url", url),
+      this._rHSet(SEARCH_STATE_KEY, "providerIndex", this._providerTypeIndex)
     ]);
   }
 
@@ -99,12 +122,41 @@ export default class Crawl {
     return !!(await this._rHGet(SEARCH_STATE_KEY, "url"));
   }
 
+  async reloadProviderTypeIndex() {
+    const typeIndex = await this._rHGet(SEARCH_STATE_KEY, "providerIndex");
+    this._providerTypeIndex = !!typeIndex ? parseInt(typeIndex) : 0;
+  }
+
+  async setNewProviderSearchIndex(newIndex) {
+    console.assert(newIndex >= 0);
+    console.assert(newIndex <= PROVIDER_TYPES.length);
+
+    if (newIndex === PROVIDER_TYPES.length) {
+      l(`Provider rolled over.`);
+      return;
+    }
+
+    this._providerTypeIndex = newIndex;
+
+    l(`Provider type updated to ${PROVIDER_TYPES[newIndex]}`);
+
+    return Promise.all([
+      this._rHSet(SEARCH_STATE_KEY, "url", ""),
+      this._rHSet(SEARCH_STATE_KEY, "providerIndex", newIndex)
+    ]);
+  }
+
   async loadSearchPosition() {
-    const [sessionStorage, localStorage, cookies, url] = await Promise.all([
+    const [
+      sessionStorage,
+      localStorage,
+      url,
+      cookies
+    ] = await Promise.all([
       this._rHGet(SEARCH_STATE_KEY, "session"),
       this._rHGet(SEARCH_STATE_KEY, "local"),
-      this._rHGet(SEARCH_STATE_KEY, "cookies"),
-      this._rHGet(SEARCH_STATE_KEY, "url")
+      this._rHGet(SEARCH_STATE_KEY, "url"),
+      this._rHGet(SEARCH_STATE_KEY, "cookies")
     ]);
 
     if (!url) {
@@ -125,24 +177,35 @@ export default class Crawl {
 
   async nextPage() {
     const selector = 'button[track="next-page"]';
-    await this._page.waitForSelector(selector);
+
+    const disabled = await this._page.do(
+      selector => document.querySelector(selector).attributes.disabled,
+      selector
+    );
+
+    if (disabled) {
+      l("Next button disabled. Assuming end of search.");
+      return null;
+    }
+
     const snoopSearch = this.catchSearchResult();
     await this._page.click(selector);
+    l("Next page.");
     return snoopSearch;
   }
 
-  async newSearch(providerType) {
+  async newSearch() {
     const mhdSelector = "#step-0 > div.nodeContainer > ul > li:nth-child(2)";
     await this._page.waitForSelector(mhdSelector);
     await this._page.click(mhdSelector);
 
-    await jitterWait(1000, 500);
+    await jitterWait(2000, 500);
 
     const peopleSelector = "a[track='People']";
     await this._page.waitForSelector(peopleSelector);
     await this._page.click(peopleSelector);
 
-    await jitterWait(1000, 500);
+    await jitterWait(2000, 500);
 
     const providerSelector =
       "#step-1 > div:nth-child(2) > div.ng-if-fade." +
@@ -150,11 +213,13 @@ export default class Crawl {
     await this._page.waitForSelector(providerSelector);
     await this._page.click(providerSelector);
 
-    await jitterWait(1000, 500);
+    await jitterWait(2000, 500);
 
     let snoopSearch = this.catchSearchResult();
 
-    const typeSelector = `a[track="${providerType}"]`;
+    const typeSelector = `a[track="${
+      PROVIDER_TYPES[this._providerTypeIndex]
+    }"]`;
     await this._page.waitForSelector(typeSelector);
     await this._page.click(typeSelector);
 
@@ -214,9 +279,7 @@ export default class Crawl {
     return len;
   }
 
-  async scan(providerTypeIndex) {
-    let hardStop = false;
-
+  async scanCurrentProviderType() {
     if (this._page) {
       await this._page.close();
       this._page = null;
@@ -229,6 +292,8 @@ export default class Crawl {
     this._ua = this._page.getUserAgent();
     await this._page.goThenWait(UHC_BASE);
 
+    await jitterWait(5000, 1000);
+
     this._client = new Http2Client(HOST, AUTHORITY);
 
     let result = null;
@@ -236,33 +301,38 @@ export default class Crawl {
     if (shouldResume) {
       result = await this.loadSearchPosition();
     } else {
-      const providerType = PROVIDER_TYPES[providerTypeIndex];
+      const providerType = PROVIDER_TYPES[this._providerTypeIndex];
       l("Starting new search for provider type " + providerType);
       result = await this.newSearch(providerType);
     }
 
-    const sigHandle = () => {
-      console.warn("Caught SIGTERM! Stopping...");
-      hardStop = true;
-    };
-
-    process.on("SIGINT", sigHandle);
-
-    while (result && !hardStop) {
+    while (result) {
       await this.processSearchResult(result);
       await jitterWait(5000, 500);
       result = await this.nextPage();
       await this.saveSearchPosition();
     }
 
-    process.removeListener("SIGINT", sigHandle);
-
-    l("Search complete");
+    l("Provider type search complete");
 
     // Clean up
     await this._page.close();
     this._client.dispose();
     this._page = null;
     this._client = null;
+  }
+
+  async crawl() {
+    await this.reloadProviderTypeIndex();
+
+    l(`Beginning crawl for ${PROVIDER_TYPES[this._providerTypeIndex]}`);
+
+    while (this._providerTypeIndex < PROVIDER_TYPES.length) {
+      await this.scanCurrentProviderType();
+      await this.setNewProviderSearchIndex(this._providerTypeIndex + 1);
+    }
+
+    l("Search complete. Discarding search state.");
+    await this.setNewProviderSearchIndex(0);
   }
 }
