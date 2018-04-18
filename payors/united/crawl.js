@@ -181,13 +181,20 @@ export default class Crawl {
   async getProviderDetail(id, referrer) {
     const url = UHC_DETAIL_PATH + id + "?coverageType=behavioral";
     const headers = this.getDetailHeaders(referrer);
-    return await this._client.req(url, headers);
+    const raw = await this._client.req(url, headers);
+
+    if (raw.length < 100) {
+      console.error("Short provider detail", raw);
+    }
+
+    return JSON.parse(raw);
   }
 
   async saveProviderData(uid, list, detail) {
     const json = JSON.stringify({ list, detail });
     const added = await this._rHSet(PROVIDER_KEY, uid, json);
-    l(uid, !!added ? "+" : "o");
+    const name = list.name;
+    l(`${name.first} ${name.last}, ${name.degree}`, !!added ? "+" : "o");
   }
 
   async processSearchResult(result) {
