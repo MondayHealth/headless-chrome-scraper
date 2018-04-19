@@ -307,6 +307,14 @@ export default class Crawl {
           return;
         }
 
+        if (!body.provider) {
+          console.warn("No provider");
+          console.log(body);
+        } else if (Object.keys(body.provider).length < 50) {
+          console.warn("Detail strangely short for provider");
+          console.log(body);
+        }
+
         resolve(body);
       });
     });
@@ -381,8 +389,8 @@ export default class Crawl {
       let pid = listEntry.id;
       let detail = await this.getProviderDetail(pid, lid);
 
-      if (Object.keys(detail.provider).length < 50) {
-        console.warn("Detail strangely short for provider", listEntry.fullName);
+      if (!detail.provider) {
+        process.exit();
       }
 
       let data = JSON.stringify({ listEntry, detail });
