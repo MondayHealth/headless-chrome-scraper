@@ -105,7 +105,7 @@ export default class Crawl {
 
     const promise = this.catchSearch();
     await this._page.click(buttonSelector);
-    this.declineFeedback().then(() => l("Feedback declined."));
+    this.declineFeedback().then(() => undefined);
     this._pageIndex++;
     l("Moving to page " + this._pageIndex);
     return promise;
@@ -399,6 +399,7 @@ export default class Crawl {
       await this._page.waitForSelector(selector);
       await jitterWait(1000, 1000);
       await this._page.click(selector);
+      l("Feedback declined.", "=");
     } catch (e) {
       l("No feedback button showed up.", "=");
     }
@@ -416,7 +417,7 @@ export default class Crawl {
 
     // Go to the actual search page
     const firstSearchPromise = this.catchSearch();
-    this.declineFeedback().then(() => l("Feedback declined.", "="));
+    this.declineFeedback().then(() => undefined);
     await this._page.goThenWait(this.searchURL());
 
     let searchResults = await firstSearchPromise;
