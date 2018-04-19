@@ -1,7 +1,7 @@
 import { FEDERAL, PLANS, SEARCHES } from "./data";
 import Page from "../../page";
 import { promisify } from "util";
-import { e, l } from "../log";
+import { e, l, w } from "../log";
 import { jitterWait } from "../time-utils";
 import request from "request";
 
@@ -309,7 +309,7 @@ export default class Crawl {
 
         if (body.error) {
           switch (body.error.errorId) {
-            case 'SE001011':
+            case "SE001011":
               e("Invalid provider info for " + providerID + " / " + locationID);
               resolve(null);
               return;
@@ -402,14 +402,14 @@ export default class Crawl {
       let pid = listEntry.id;
       let detail = await this.getProviderDetail(pid, lid);
 
-      if (detail) {
-        let data = JSON.stringify({ listEntry, detail });
-        let uid = pid + ":" + lid;
-        let added = await this._rHSet(PROVIDER_KEY, uid, data);
-        l(listEntry.fullName, !!added ? "+" : "o");
-      } else {
-        e(`Skipping provider ${listEntry.fullName}`);
+      if (!detail) {
+        w(`Only partial data for ${listEntry.fullName}`);
       }
+
+      let data = JSON.stringify({ listEntry, detail });
+      let uid = pid + ":" + lid;
+      let added = await this._rHSet(PROVIDER_KEY, uid, data);
+      l(listEntry.fullName, !!added ? "+" : "o");
 
       await jitterWait(750, 500);
     }
