@@ -308,7 +308,7 @@ export default class Crawl {
         }
 
         if (body.error) {
-          switch (body.errorId) {
+          switch (body.error.errorId) {
             case 'SE001011':
               e("Invalid provider info for " + providerID + " / " + locationID);
               resolve(null);
@@ -407,6 +407,8 @@ export default class Crawl {
         let uid = pid + ":" + lid;
         let added = await this._rHSet(PROVIDER_KEY, uid, data);
         l(listEntry.fullName, !!added ? "+" : "o");
+      } else {
+        e(`Skipping provider ${listEntry.fullName}`);
       }
 
       await jitterWait(750, 500);
