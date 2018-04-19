@@ -23,7 +23,9 @@ export default class Crawl {
     this._currentHref = null;
     this._detailCookie = null;
 
+    // noinspection JSUnresolvedVariable
     this._rHSet = promisify(redis.hset).bind(redis);
+    // noinspection JSUnresolvedVariable
     this._rHGet = promisify(redis.hget).bind(redis);
 
     // Default settings
@@ -42,30 +44,43 @@ export default class Crawl {
     process.on("SIGINT", this._sigHandle);
   }
 
+  /**
+   * Get a query string from a map
+   * @param {Object} obj
+   * @returns {string}
+   */
   static queryStringForObject(obj) {
     return Object.entries(obj)
       .map(([key, value]) => key + "=" + value)
       .join("&");
   }
 
-  async catchLogin() {
-    return this.generateRequestCatcher("public/service/login");
+  /**
+   * Listen for login requests and record the responses
+   * @returns {Function}
+   */
+  catchLogin() {
+    return this._page.onResponse(response => {
+      if (response.url().indexOf("public/service/login") >= 0) {
+        response.text().then(body => this.updateLoginData(JSON.parse(body)));
+      }
+    });
   }
 
+  /**
+   * Catch the first search request that happens on the page and return the
+   * contents
+   * @returns {Promise<Object>}
+   */
   async catchSearch() {
-    return this.generateRequestCatcher("public/service/search");
-  }
-
-  async generateRequestCatcher(substring) {
     return new Promise(resolve => {
       const stop = this._page.onResponse(response => {
-        if (response.url().indexOf(substring) < 0) {
+        if (response.url().indexOf("public/service/search") < 0) {
           return;
         }
 
         const headers = response.request().headers();
         this._distilAjax = headers[DISTL_AJAX_HEADER];
-        this._detailCookie = response.request().headers().Cookie;
 
         response.text().then(body => {
           stop();
@@ -75,6 +90,11 @@ export default class Crawl {
     });
   }
 
+  /**
+   * Click the next button on the current search.
+   * @returns {Promise<null|Object>} Null of no next button or the result of
+   *   the next click
+   */
   async clickNext() {
     const buttonSelector = 'button[data-test="right-arrow-pagination-link"]';
     const element = await this._page.$(buttonSelector);
@@ -91,11 +111,19 @@ export default class Crawl {
     return promise;
   }
 
+  /**
+   * Get the domain of the current plan search
+   * @returns {string}
+   */
   domain() {
     const plan = PLANS[this._planIndex];
     return plan.domain ? plan.domain : "provider.bcbs.com";
   }
 
+  /**
+   * Generate the full URL of a provider search
+   * @returns {string}
+   */
   searchURL() {
     const plan = PLANS[this._planIndex];
 
@@ -158,19 +186,35 @@ export default class Crawl {
     return ret;
   }
 
+  /**
+   * Get the current plans name
+   * @returns {string}
+   */
   currentPlan() {
     return PLANS[this._planIndex].name;
   }
 
+  /**
+   * Get the product code for the current plan
+   * @returns {string}
+   */
   currentProductCode() {
     return PLANS[this._planIndex].productCode;
   }
 
+  /**
+   * Save the search state
+   * @returns {Promise<number>}
+   */
   async storeSearchState() {
     const state = [this._planIndex, this._searchSettingsIndex, this._pageIndex];
     return this._rHSet(SEARCH_KEY, "searchState", JSON.stringify(state));
   }
 
+  /**
+   * Restore the search state
+   * @returns {Promise<void>}
+   */
   async loadSearchState() {
     const rawState = await this._rHGet(SEARCH_KEY, "searchState");
     [this._planIndex, this._searchSettingsIndex, this._pageIndex] = rawState
@@ -179,16 +223,32 @@ export default class Crawl {
     l(`Resuming search ${this.describeSearch()}`);
   }
 
+  /**
+   * Get a human readable description of the search state
+   * @returns {string}
+   */
   describeSearch() {
     return `${this.currentPlan()} (Search ${this._searchSettingsIndex}, Page ${
       this._pageIndex
     })`;
   }
 
+  /**
+   * Reset the search state
+   * @returns {Promise<number>}
+   */
   async clearSearchState() {
     return this._rHSet(SEARCH_KEY, "searchState", "");
   }
 
+  /**
+   * Get the request headers for detail requests
+   * @returns {{Accept: string, "Accept-Encoding": string, "Accept-Language":
+   *   string, "Cache-Control": string, Connection: string, Cookie: null|*,
+   *   DNT: number, Host: *, Pragma: string, Referer: string, "User-Agent":
+   *   null|*, "X-Distil-Ajax": null|*, "x-dtreferer": null|*,
+   *   "X-Requested-With": string}}
+   */
   getDetailRequestHeaders() {
     return {
       Accept: "application/json, text/javascript, */*; q=0.01",
@@ -208,6 +268,12 @@ export default class Crawl {
     };
   }
 
+  /**
+   * Get provider detail via GET request
+   * @param {number} providerID
+   * @param {number} locationID
+   * @returns {Promise<Object>}
+   */
   async getProviderDetail(providerID, locationID) {
     const headers = this.getDetailRequestHeaders();
 
@@ -246,16 +312,25 @@ export default class Crawl {
     });
   }
 
+  /**
+   * Update our accounting of the current href of the page
+   * @returns {Promise<void>}
+   */
   async updateHref() {
     // noinspection JSUnresolvedVariable
     this._currentHref = await this._page.do(() => document.location.href);
   }
 
+  /**
+   * Get the detail GET request cookie header as a string
+   * @returns {Promise<string>}
+   */
   async updateDetailCookieString() {
     const cookies = await this._page.cookies();
     const map = {};
     cookies.forEach(({ name, value }) => (map[name] = value));
 
+    // noinspection JSUnresolvedVariable
     const jsid = "JSESSIONID=" + this._loginData.analyticsSupport.jsessionId;
 
     const order = [
@@ -283,6 +358,11 @@ export default class Crawl {
     this._detailCookie = result.join("; ");
   }
 
+  /**
+   * Make detail requests for an array of search results
+   * @param {Array.<Object>} results The search results
+   * @returns {Promise<void>}
+   */
   async processSearchResults(results) {
     // We need this to be current for headers
     await this.updateHref();
@@ -320,8 +400,13 @@ export default class Crawl {
       await jitterWait(1000, 1000);
       await this._page.click(selector);
     } catch (e) {
-      l("No feedback button showed up.");
+      l("No feedback button showed up.", "=");
     }
+  }
+
+  updateLoginData(newData) {
+    this._loginData = newData;
+    l("Login data updated.", "=");
   }
 
   async conductSearch() {
@@ -331,11 +416,8 @@ export default class Crawl {
 
     // Go to the actual search page
     const firstSearchPromise = this.catchSearch();
-    this.declineFeedback().then(() => l("Feedback declined."));
+    this.declineFeedback().then(() => l("Feedback declined.", "="));
     await this._page.goThenWait(this.searchURL());
-
-    l("Waiting for login data to be caught");
-    this._loginData = await loginPromise;
 
     let searchResults = await firstSearchPromise;
     while (searchResults) {
@@ -354,8 +436,7 @@ export default class Crawl {
     this._page = await Page.newPageFromBrowser(this._browser);
     this._ua = this._page.getUserAgent();
 
-    // Wait for login data
-    const loginPromise = this.catchLogin();
+    this.catchLogin();
 
     l("Waiting for main search page to load to establish login");
     await this._page.goThenWait("https://" + this.domain());
