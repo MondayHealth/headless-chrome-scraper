@@ -1,6 +1,6 @@
 import puppeteer from "puppeteer";
 import redis from "redis";
-import { crawl } from "./payors/emblem";
+import { crawl } from "./payors/bcbs";
 
 // noinspection JSUnusedGlobalSymbols
 export async function bootstrap() {
