@@ -31,7 +31,10 @@ export default class OxfordCrawl extends UnitedCrawl {
 
   providerTypes() {
     return [
-      "Neurology and Psychiatry"
+      "Psychology - Clinical",
+      "Neurology and Psychiatry",
+      "Licensed Professional Counselor",
+      "Social Work"
     ];
   }
 
