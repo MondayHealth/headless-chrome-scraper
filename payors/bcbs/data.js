@@ -1,3 +1,5 @@
+import { jitterWait } from "../time-utils";
+
 export const FEDERAL = Symbol("Federal Employee Program");
 
 export const PLANS = [
@@ -14,19 +16,19 @@ export const PLANS = [
     productCode: "BCBSAPAR"
   },
   {
-    name: "New York, BC&BS of Western",
+    name: "New York, BlueCross & BlueShield of Western",
     productCode: "NYNY8M"
   },
   {
-    name: "New York, Blue Shield of Northeastern",
+    name: "New York, BlueShield of Northeastern",
     productCode: "NYNY0M"
   },
   {
-    name: "New York, Empire BCBS",
+    name: "New York, Empire Blue Cross Blue Shield",
     productCode: "NYNYM2"
   },
   {
-    name: "New York, Excellus BCBS",
+    name: "New York, Excellus Blue Cross Blue Shield",
     productCode: "NYNYM3"
   },
   {
@@ -37,43 +39,75 @@ export const PLANS = [
   }
 ];
 
+async function selectSpecialty(page, idx) {
+  await page.click(
+    'div[data-test="as-specialties-section-body"] > div.filter-content > ' +
+      "div.filter-content-container.pl-1 > div:nth-child(" +
+      (idx + 1) +
+      ") > label"
+  );
+  return jitterWait(250, 100);
+}
+
+/**
+ * Returns an array of specialties
+ * @param page
+ * @returns {Promise<Array.<string>>}
+ */
+async function createSpecialtyMap(page) {
+  return page.do(selector => {
+    const b = document.querySelector(selector);
+    return Array.from(
+      b.querySelectorAll("span.custom-control-description")
+    ).map(s => s.innerHTML);
+  }, 'div[data-test="as-specialties-section"] > div > div > div.filter-content-container.pl-1');
+}
+
+async function selectProviderTypeAndSpecialties(page, index, specList) {
+  const select =
+    'div[data-test="as-provider-type-section-body"] label.custom-radio';
+  const elements = await page.$$(select);
+  elements[index].click();
+  await jitterWait(750, 500);
+
+  const specs = await createSpecialtyMap(page);
+
+  for (let i = 0; i < specList.length; i++) {
+    let idx = specs.indexOf(specList[i]);
+    console.assert(idx > -1, specList[i]);
+    await selectSpecialty(page, idx);
+    await jitterWait(250, 100);
+  }
+}
+
 export const SEARCHES = [
-  {
-    providerType: "CNSLR",
-    providerSubTypes: ["9807043", "CNSLR", "8837384", "8112342"],
-    specialties: [
-      "Addiction%2520Medicine",
-      "Behavioral%2520Health%2520Analyst",
-      "Clinical%2520Psychology",
-      "Licensed%2520Professional%2520Counselor",
-      "Marriage%2520%2526%2520Family%2520Therapy",
-      "Psychoanalysis",
-      "Psychology",
-      "Sleep%2520Disorder%2520Diagnostics",
-      "Social%2520Work%2520-%2520Chemical%2520Dependency%2520Counselor",
-      "Social%2520Work%2520-%2520Clinical"
-    ]
+  // Select Assistant & Nursing Providers
+  async page => {
+    return selectProviderTypeAndSpecialties(page, 5, [
+      "Nursing - Psychiatry",
+      "Physician Assistant - Psychiatry",
+      "Psychiatric Nurse"
+    ]);
   },
-  {
-    providerType: "PHYSC",
-    providerSubTypes: ["9807043", "8109393"],
-    specialties: [
-      "Addiction%2520Medicine",
-      "Adolescent%2520Medicine",
-      "Child%2520Psychiatry",
-      "Licensed%2520Professional%2520Counselor",
+
+  // Select physician
+  async page => {
+    return selectProviderTypeAndSpecialties(page, 4, [
+      "Addiction Medicine",
+      "Developmental Behavioral Pediatrics",
+      "Child Psychiatry",
+      "Psychiatry &amp; Neurology",
       "Psychiatry",
-      "Psychiatry%2520%2526%2520Neurology",
       "Psychoanalysis"
-    ]
+    ]);
   },
-  {
-    providerType: "PHYAST",
-    providerSubTypes: ["9807046"],
-    specialties: [
-      "Nursing%2520-%2520Psychiatry",
-      "Physician%2520Assistant%2520-%2520Psychiatry",
-      "Psychiatric%2520Nurse"
-    ]
+
+  // Select counselor with no modifications
+  async page => {
+    const select =
+      'div[data-test="as-provider-type-section-body"] label.custom-radio';
+    const elements = await page.$$(select);
+    elements[0].click();
+    await jitterWait(250, 100);
   }
 ];

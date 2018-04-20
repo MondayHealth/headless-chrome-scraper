@@ -59,6 +59,10 @@ export default class Page {
     return this._page.$(selector);
   }
 
+  async $$(selector) {
+    return this._page.$$(selector);
+  }
+
   async do(fxn, params) {
     return this._page.evaluate(fxn, params);
   }

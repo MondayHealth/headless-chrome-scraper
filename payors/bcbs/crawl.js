@@ -11,6 +11,12 @@ const PROVIDER_KEY = "bcbs:providers";
 
 const SEARCH_KEY = "bcbs:last-search";
 
+const ADVANCED_SEARCH =
+  "app/public/#/one/city=&" +
+  "state=&postalCode=&country=&insurerCode=BCBSA_I&b" +
+  "randCode=BCBSANDHF&alphaPrefix=&bcbsaProductId/ad" +
+  "vanced-search";
+
 export default class Crawl {
   constructor(browser, redis) {
     this._browser = browser;
@@ -30,7 +36,7 @@ export default class Crawl {
 
     // Default settings
     this._planIndex = 0;
-    this._searchSettingsIndex = 0;
+    this._searchSettingsIndex = 1;
     this._pageIndex = 1;
 
     // We have issues with this and BCBS sometimes
@@ -70,7 +76,7 @@ export default class Crawl {
   /**
    * Catch the first search request that happens on the page and return the
    * contents
-   * @returns {Promise<Object>}
+   * @returns {Promise<Array.<Object>>}
    */
   async catchSearch() {
     return new Promise(resolve => {
@@ -118,72 +124,6 @@ export default class Crawl {
   domain() {
     const plan = PLANS[this._planIndex];
     return plan.domain ? plan.domain : "provider.bcbs.com";
-  }
-
-  /**
-   * Generate the full URL of a provider search
-   * @returns {string}
-   */
-  searchURL() {
-    const plan = PLANS[this._planIndex];
-
-    const searchSettings = SEARCHES[this._searchSettingsIndex];
-    const providerType = searchSettings.providerType;
-    const specialties = searchSettings.specialties.join("&specialties=");
-    const providerSubTypes = searchSettings.providerSubTypes.join(
-      "&providerSubTypes="
-    );
-
-    const domain = this.domain();
-    const base = `https://${domain}/app/public/#/one/`;
-
-    const firstParams = Crawl.queryStringForObject({
-      city: "",
-      state: "",
-      postalCode: "",
-      country: "",
-      insurerCode: "BCBSA_I",
-      brandCode: plan.brandCode ? plan.brandCode : "BCBSANDHF",
-      alphaPrefix: "",
-      bcbsaProductId: ""
-    });
-
-    const secondPath = "/results/";
-
-    const secondParams = Crawl.queryStringForObject({
-      acceptingNewPatients: false,
-      alphaPrefix: "",
-      boardCertified: "",
-      hasExtendedHours: false,
-      gender: "",
-      isEligiblePCP: false,
-      location: "New%2520York%252C%2520NY",
-      maxLatitude: "",
-      maxLongitude: "",
-      minLatitude: "",
-      minLongitude: "",
-      name: "",
-      page: this._pageIndex, // Starts at 1
-      patientAgeRestriction: "",
-      patientGenderRestriction: "",
-      providerCategory: "P",
-      providerSubTypes,
-      providerType,
-      qualityRecognitions: "",
-      searchType: "default",
-      radius: 50, // 1, 5, 25, 50, 100, 150
-      size: 10,
-      sort: "DEFAULT",
-      specialties
-    });
-
-    let ret = base + firstParams + secondPath + secondParams;
-
-    if (plan.productCode !== FEDERAL) {
-      ret += "&productCode=" + plan.productCode;
-    }
-
-    return ret;
   }
 
   /**
@@ -380,6 +320,33 @@ export default class Crawl {
   }
 
   /**
+   * Download a provider detail object based on what was sent in the search
+   * listing
+   * @param {Object} listing
+   * @returns {Promise<void>}
+   */
+  async getDetail(listing) {
+    let lid = listing.bestLocation
+      ? listing.bestLocation.id
+      : listing.locations[0].id;
+
+    let pid = listing.id;
+    let detail = await this.getProviderDetail(pid, lid);
+
+    if (!detail) {
+      w(`Only partial data for ${listing.fullName}`);
+    }
+
+    let data = JSON.stringify({ listing, detail });
+    let uid = pid + ":" + lid;
+    let added = await this._rHSet(PROVIDER_KEY, uid, data);
+    l(
+      listing.fullName + ", " + listing.credentialDegreeLabel,
+      !!added ? "+" : "o"
+    );
+  }
+
+  /**
    * Make detail requests for an array of search results
    * @param {Array.<Object>} results The search results
    * @returns {Promise<void>}
@@ -392,29 +359,20 @@ export default class Crawl {
     const providers = results.providers;
     const count = providers.length;
 
+    const promises = [];
+
     for (let i = 0; i < count; i++) {
-      let listEntry = providers[i];
-
-      let lid = listEntry.bestLocation
-        ? listEntry.bestLocation.id
-        : listEntry.locations[0].id;
-
-      let pid = listEntry.id;
-      let detail = await this.getProviderDetail(pid, lid);
-
-      if (!detail) {
-        w(`Only partial data for ${listEntry.fullName}`);
-      }
-
-      let data = JSON.stringify({ listEntry, detail });
-      let uid = pid + ":" + lid;
-      let added = await this._rHSet(PROVIDER_KEY, uid, data);
-      l(listEntry.fullName, !!added ? "+" : "o");
-
+      promises.push(this.getDetail(providers[i]));
       await jitterWait(750, 500);
     }
+
+    return Promise.all(promises);
   }
 
+  /**
+   * Checks for the feedback popup and dismisses it
+   * @returns {Promise<void>}
+   */
   async declineFeedback() {
     const selector = "a.acsInviteButton.acsDeclineButton";
     try {
@@ -438,9 +396,8 @@ export default class Crawl {
     l(this.describeSearch(), ">");
 
     // Go to the actual search page
-    const firstSearchPromise = this.catchSearch();
+    const firstSearchPromise = await this.beginSearch();
     this.declineFeedback().then(() => undefined);
-    await this._page.goThenWait(this.searchURL());
 
     let searchResults = await firstSearchPromise;
     while (searchResults) {
@@ -453,6 +410,50 @@ export default class Crawl {
     l("Search complete");
   }
 
+  async beginSearch(radius) {
+    const plan = PLANS[this._planIndex];
+
+    const url = `https://${this.domain()}/${ADVANCED_SEARCH}`;
+
+    if (plan.productCode !== FEDERAL) {
+      await this._page.goThenWait(url);
+      await jitterWait(750, 750);
+      await this._page.click('button[data-test="search-by-plan-trigger"]');
+      await jitterWait(750, 750);
+      await this._page.click(
+        "button.rad-button.btn.mt-3.btn-link.btn-unstyled"
+      );
+      await jitterWait(750, 750);
+
+      // Search plan by name
+      const spbnSelector = 'div[role="dialog"] input.form-control';
+      await this._page.click(spbnSelector);
+      await jitterWait(750, 750);
+      await this._page.type(spbnSelector, plan.name);
+
+      // Click the top link
+      const topPlanSelector = 'button[data-test="planfix-plan"]';
+      await this._page.click(topPlanSelector);
+      await jitterWait(750, 750);
+    }
+
+    await SEARCHES[this._searchSettingsIndex](this._page);
+
+    await this._page.clickAndWaitForNav('button[data-test="as-submit-form"]');
+    let href = await this._page.href();
+    href = href.replace("radius=25", "radius=" + (radius ? radius : 50));
+
+    if (this._pageIndex > 1) {
+      href = href.replace("page=1", "page=" + this._pageIndex);
+    }
+
+    await jitterWait(250, 250);
+
+    const searchPromise = this.catchSearch();
+    await this._page.goThenWait(href);
+    return searchPromise;
+  }
+
   async crawl() {
     await this.loadSearchState();
 
@@ -460,9 +461,6 @@ export default class Crawl {
     this._ua = this._page.getUserAgent();
 
     this.catchLogin();
-
-    l("Waiting for main search page to load to establish login");
-    await this._page.goThenWait("https://" + this.domain());
 
     for (; this._planIndex < PLANS.length; this._planIndex++) {
       for (
