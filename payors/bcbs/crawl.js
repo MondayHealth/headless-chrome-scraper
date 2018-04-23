@@ -2,7 +2,7 @@ import { FEDERAL, PLANS, SEARCHES } from "./data";
 import Page from "../../page";
 import { promisify } from "util";
 import { e, l, w } from "../log";
-import { jitterWait } from "../time-utils";
+import { jitterWait, wait } from "../time-utils";
 import request from "request";
 
 const DISTL_AJAX_HEADER = "X-Distil-Ajax";
@@ -415,26 +415,28 @@ export default class Crawl {
 
     const url = `https://${this.domain()}/${ADVANCED_SEARCH}`;
 
+    await this._page.goThenWait(url);
+    await jitterWait(750, 500);
+
+    // Only select the plan if its not federal
     if (plan.productCode !== FEDERAL) {
-      await this._page.goThenWait(url);
-      await jitterWait(750, 750);
       await this._page.click('button[data-test="search-by-plan-trigger"]');
-      await jitterWait(750, 750);
+      await jitterWait(1500, 1000);
       await this._page.click(
         "button.rad-button.btn.mt-3.btn-link.btn-unstyled"
       );
-      await jitterWait(750, 750);
+      await jitterWait(1500, 1000);
 
       // Search plan by name
       const spbnSelector = 'div[role="dialog"] input.form-control';
       await this._page.click(spbnSelector);
-      await jitterWait(750, 750);
+      await jitterWait(1500, 1000);
       await this._page.type(spbnSelector, plan.name);
 
       // Click the top link
       const topPlanSelector = 'button[data-test="planfix-plan"]';
       await this._page.click(topPlanSelector);
-      await jitterWait(750, 750);
+      await jitterWait(1750, 750);
     }
 
     await SEARCHES[this._searchSettingsIndex](this._page);
@@ -470,6 +472,9 @@ export default class Crawl {
       ) {
         await this.conductSearch();
       }
+      l(`Finished plans. Resetting.`);
+      this._pageIndex = 0;
+      this._searchSettingsIndex = 0;
     }
 
     return this.clearSearchState();

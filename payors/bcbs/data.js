@@ -4,10 +4,6 @@ export const FEDERAL = Symbol("Federal Employee Program");
 
 export const PLANS = [
   {
-    name: "BlueCard PPO/EPO",
-    productCode: "BCBSAPPO"
-  },
-  {
     name: "BlueCard PPO Basic",
     productCode: "BCBSABASIC"
   },
@@ -36,7 +32,12 @@ export const PLANS = [
     domain: "provider.fepblue.org",
     productCode: FEDERAL,
     brandCode: "BCBSAFEP"
-  }
+  },
+
+  {
+    name: "BlueCard PPO/EPO",
+    productCode: "BCBSAPPO"
+  },
 ];
 
 async function selectSpecialty(page, idx) {
@@ -62,6 +63,8 @@ async function createSpecialtyMap(page) {
     ).map(s => s.innerHTML);
   }, 'div[data-test="as-specialties-section"] > div > div > div.filter-content-container.pl-1');
 }
+
+async function createProvider ma
 
 async function selectProviderTypeAndSpecialties(page, index, specList) {
   const select =

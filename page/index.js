@@ -155,6 +155,18 @@ export default class Page {
     return this.go(url, { waitUntil: "networkidle2" });
   }
 
+  async repeatDeleteKey(count) {
+    const promises = [];
+    for (let i = 0; i < count; i++) {
+      promises.push(this._page.keyboard.press('Backspace'));
+    }
+    return Promise.all(promises);
+  }
+
+  mouse() {
+    return this._page.mouse;
+  }
+
   async go(url, opts) {
     return this._page.goto(url, opts || {});
   }
