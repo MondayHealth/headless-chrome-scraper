@@ -2,10 +2,6 @@ export const FEDERAL = Symbol("Federal Employee Program");
 
 export const PLANS = [
   {
-    name: "BlueCard PPO/EPO",
-    productCode: "BCBSAPPO"
-  },
-  {
     name: "BlueCard PPO Basic",
     productCode: "BCBSABASIC"
   },
@@ -34,7 +30,11 @@ export const PLANS = [
     domain: "provider.fepblue.org",
     productCode: FEDERAL,
     brandCode: "BCBSAFEP"
-  }
+  },
+  {
+    name: "BlueCard PPO/EPO",
+    productCode: "BCBSAPPO"
+  },
 ];
 
 export const NURSING = Symbol();

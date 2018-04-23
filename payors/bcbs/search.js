@@ -16,6 +16,8 @@ const ADVANCED_SEARCH_SUFFIX =
 
 const SEARCH_KEY = "bcbs:last-search";
 
+const DISTL_AJAX_HEADER = "X-Distil-Ajax";
+
 const SEARCH_RADIUS = 50;
 
 export class BCBSSearch {
@@ -53,14 +55,18 @@ export class BCBSSearch {
     return PLANS[this._planIndex].productCode;
   }
 
+  currentSearchSetting() {
+    const search = SEARCHES[this._searchConfigurationIndex];
+    return SEARCH_SETTINGS[search].providerName;
+  }
+
   /**
    * Get a human readable description of the search state
    * @returns {string}
    */
   describeSearch() {
-    return `${this.currentPlan()} (Search ${
-      this._searchConfigurationIndex
-    }, Page ${this._pageIndex})`;
+    const search = this.currentSearchSetting();
+    return `${this.currentPlan()} / ${search} (Page ${this._pageIndex})`;
   }
 
   /**
@@ -256,11 +262,6 @@ export class BCBSSearch {
     await this._page.goThenWait(url);
     await jitterWait(750, 750);
 
-    // Type in location
-    await this._page.click("input#input-location");
-    // @TODO: Do delete a bunch of times!
-    await this._page.type("input#input-location", "New York, NY");
-
     const plan = this.getCurrentPlan();
 
     // Federal is a plan, so no selection necessary
@@ -285,7 +286,14 @@ export class BCBSSearch {
       await jitterWait(750, 750);
     }
 
-    // @TODO: Search settings
+    // Type in location
+    const inputSelector = "input#doctors-basics-location";
+    await this._page.click(inputSelector);
+    await this._page.repeatDeleteKey(50);
+    await this._page.type(inputSelector, "New York City, NY");
+
+    await jitterWait(500, 500);
+
     await this.selectProviderTypeAndSpecialties();
 
     await this._page.clickAndWaitForNav('button[data-test="as-submit-form"]');
@@ -313,6 +321,7 @@ export class BCBSSearch {
     this._pageIndex = 0;
     this._searchConfigurationIndex++;
 
+    // Do we have more search configurations?
     if (this._searchConfigurationIndex < SEARCH_SETTINGS.length) {
       return true;
     }

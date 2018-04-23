@@ -5,8 +5,6 @@ import { jitterWait } from "../time-utils";
 import request from "request";
 import { BCBSSearch } from "./search";
 
-const DISTL_AJAX_HEADER = "X-Distil-Ajax";
-
 const PROVIDER_KEY = "bcbs:providers";
 
 export default class Crawl {
