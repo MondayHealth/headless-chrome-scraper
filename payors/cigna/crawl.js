@@ -12,8 +12,28 @@ export default class Crawl {
     this._ua = null;
   }
 
-  async generateSpecialityList() {
+  /**
+   *
+   * @returns {Promise<*[]>}
+   */
+  async getSpecialties() {
+    const select =
+      "#filterP > div > div.drawer-content > div.directory-facets-group > " +
+      "div > div > div:nth-child(2) > fieldset > div > label";
 
+    const p1 = this._page.do(selector => {
+      // noinspection JSUnresolvedVariable
+      return Array.from(document.querySelectorAll(selector)).map(a =>
+        a.textContent
+          .trim()
+          .split("\n")[0]
+          .trim()
+      );
+    }, select);
+
+    const p2 = this._page.$$(select);
+
+    return Promise.all([p1, p2]);
   }
 
   async crawl() {
@@ -32,7 +52,8 @@ export default class Crawl {
     await page.clickAndWaitForNav("button#search");
     await jitterWait(500, 500);
 
-    const selector = 'span.ui-slider-handle.ui-state-default.ui-corner-all';
+    const selector = "span.ui-slider-handle.ui-state-default.ui-corner-all";
+    await page.waitForSelector(selector);
     const handle = await page.$(selector);
     const box = await handle.boundingBox();
     const mouse = page.mouse();
@@ -45,7 +66,21 @@ export default class Crawl {
     await mouse.move(Math.ceil(5 * SEARCH_RADIUS), 0);
     await mouse.up();
 
-    console.log("hello");
+    const [specialties, elements] = await this.getSpecialties();
 
+    console.log(specialties);
+
+    const desired = [
+      "Counseling",
+      "Psychiatry",
+      "Psychology",
+      "Psychology, Neurological",
+      "Social Work",
+      "Counseling"
+    ].map(elt => elements[specialties.indexOf(elt)]);
+
+    await Promise.all(desired.map(value => value.click()));
+
+    console.log("wait");
   }
 }

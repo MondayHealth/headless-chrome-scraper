@@ -34,7 +34,7 @@ export const PLANS = [
   {
     name: "BlueCard PPO/EPO",
     productCode: "BCBSAPPO"
-  },
+  }
 ];
 
 export const NURSING = Symbol();
@@ -42,8 +42,6 @@ export const NURSING = Symbol();
 export const PHYSICIAN = Symbol();
 
 export const COUNSELOR = Symbol();
-
-export const SEARCHES = [NURSING, PHYSICIAN, COUNSELOR];
 
 export const SEARCH_SETTINGS = {
   [NURSING]: {
@@ -69,3 +67,5 @@ export const SEARCH_SETTINGS = {
 
   [COUNSELOR]: { providerName: "Counselor/Therapist", specialtyNames: [] }
 };
+
+export const SEARCHES = Object.getOwnPropertySymbols(SEARCH_SETTINGS);

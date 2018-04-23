@@ -1,11 +1,11 @@
 import puppeteer from "puppeteer";
 import redis from "redis";
-import { crawl } from "./payors/bcbs";
+import { crawl } from "./payors/cigna";
 
 // noinspection JSUnusedGlobalSymbols
 export async function bootstrap() {
   const redisClient = redis.createClient();
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await puppeteer.launch({ headless: false });
 
   try {
     // await scanProviders(browser, redisClient);

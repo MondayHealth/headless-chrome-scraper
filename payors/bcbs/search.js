@@ -43,7 +43,7 @@ export class BCBSSearch {
    * Get the current plans name
    * @returns {string}
    */
-  currentPlan() {
+  currentPlanName() {
     return PLANS[this._planIndex].name;
   }
 
@@ -66,7 +66,7 @@ export class BCBSSearch {
    */
   describeSearch() {
     const search = this.currentSearchSetting();
-    return `${this.currentPlan()} / ${search} (Page ${this._pageIndex})`;
+    return `${this.currentPlanName()} / ${search} (Page ${this._pageIndex})`;
   }
 
   /**
@@ -259,7 +259,7 @@ export class BCBSSearch {
         l(
           `${providerName} specialty "${
             specialtyNames[i]
-          }" not found for plan ${this.currentPlan()}. Skipping.`
+          }" not found for plan ${this.currentPlanName()}. Skipping.`
         );
         continue;
       }
@@ -278,7 +278,7 @@ export class BCBSSearch {
     const plan = this.getCurrentPlan();
 
     // Federal is a plan, so no selection necessary
-    if (plan !== FEDERAL) {
+    if (plan.productCode !== FEDERAL) {
       // Continue by selecting the specific plan
       const spSelect = 'button[data-test="search-by-plan-trigger"]';
       await this._page.waitForSelector(spSelect);
@@ -295,18 +295,21 @@ export class BCBSSearch {
       await jitterWait(750, 750);
       await this._page.type(spbnSelector, plan.name, 25);
 
+      await jitterWait(750, 750);
+
       // Click the top link
       const topPlanSelector = 'button[data-test="planfix-plan"]';
+      await this._page.waitForSelector(topPlanSelector);
       await this._page.click(topPlanSelector);
       await jitterWait(750, 750);
     }
 
-    // Type in location
+    // Type in location. This may not be necessary if the scrape is run in NYC
     /**
     const inputSelector = "input#doctors-basics-location";
     await this._page.click(inputSelector);
     await this._page.repeatDeleteKey(50);
-    await this._page.type(inputSelector, "New York City, NY", 25);
+    await this._page.type(inputSelector, "New York, NY", 25);
     await jitterWait(500, 500);
      */
 
@@ -324,8 +327,8 @@ export class BCBSSearch {
     // can not select radius from the advanced page
     const href = await this._page.href();
     let newLoc = href.replace("radius=25", "radius=" + SEARCH_RADIUS);
-    if (this._pageIndex > 0) {
-      newLoc = newLoc.replace("page=1", "page=" + (this._pageIndex + 1));
+    if (this._pageIndex > 1) {
+      newLoc = newLoc.replace("page=1", "page=" + this._pageIndex);
     }
 
     // If there's nothing to change, return the search results we caught
@@ -342,11 +345,11 @@ export class BCBSSearch {
   }
 
   nextSearch() {
-    this._pageIndex = 0;
+    this._pageIndex = 1;
     this._searchConfigurationIndex++;
 
     // Do we have more search configurations?
-    if (this._searchConfigurationIndex < SEARCH_SETTINGS.length) {
+    if (this._searchConfigurationIndex < SEARCHES.length) {
       return true;
     }
 
@@ -373,7 +376,7 @@ export class BCBSSearch {
     await this._page.click(buttonSelector);
     this.declineFeedback().then(() => undefined);
     this._pageIndex++;
-    l("Moving to page " + (this._pageIndex + 1));
+    l("Moving to page " + this._pageIndex);
     return promise;
   }
 }

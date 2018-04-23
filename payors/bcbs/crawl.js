@@ -10,7 +10,6 @@ const PROVIDER_KEY = "bcbs:providers";
 export default class Crawl {
   constructor(browser, redis) {
     this._browser = browser;
-    this._redis = redis;
     this._page = null;
     this._ua = null;
 
