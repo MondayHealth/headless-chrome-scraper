@@ -136,6 +136,8 @@ export class BCBSSearch {
         const headers = response.request().headers();
         this._distilAjax = headers[DISTL_AJAX_HEADER];
 
+        l("Caught search results");
+
         response.text().then(body => {
           stop();
           resolve(JSON.parse(body));
@@ -151,8 +153,8 @@ export class BCBSSearch {
   async declineFeedback() {
     const selector = "a.acsInviteButton.acsDeclineButton";
     try {
-      await this._page.waitForSelector(selector);
-      await jitterWait(1000, 1000);
+      await this._page.waitForSelector(selector, 10000);
+      await jitterWait(250, 250);
       await this._page.click(selector);
       l("Feedback declined.", "=");
     } catch (e) {
@@ -183,6 +185,10 @@ export class BCBSSearch {
    * @returns {Promise<Array.<string>>}
    */
   async createProviderMap() {
+    const sel = 'div[data-test="as-provider-type-section-body"]';
+
+    await this._page.waitForSelector(sel);
+
     return this._page.do(selector => {
       // noinspection JSUnresolvedVariable
       const b = document.querySelector(selector);
@@ -190,7 +196,7 @@ export class BCBSSearch {
       return Array.from(
         b.querySelectorAll("span.custom-control-description")
       ).map(s => s.innerHTML);
-    }, 'div[data-test="as-provider-type-section-body"]');
+    }, sel);
   }
 
   async selectProvider(idx) {
@@ -209,7 +215,7 @@ export class BCBSSearch {
     }
 
     await elt.click();
-    return jitterWait(750, 250);
+    return jitterWait(1000, 500);
   }
 
   async selectSpecialty(idx) {
@@ -237,6 +243,12 @@ export class BCBSSearch {
 
     // Select the provider type by index
     const providerMap = await this.createProviderMap();
+
+    if (!providerMap || providerMap.length < 1) {
+      console.error("Failed to generate provider map!");
+      process.exit(1);
+    }
+
     await this.selectProvider(providerMap.indexOf(providerName));
 
     const specs = await this.createSpecialtyMap();
@@ -259,26 +271,29 @@ export class BCBSSearch {
     l(this.describeSearch(), ">");
 
     const url = `https://${this.domain()}/${ADVANCED_SEARCH_SUFFIX}`;
+    l("Waiting to to make sure feedback popup isnt there");
     await this._page.goThenWait(url);
-    await jitterWait(750, 750);
+    await this.declineFeedback();
 
     const plan = this.getCurrentPlan();
 
     // Federal is a plan, so no selection necessary
     if (plan !== FEDERAL) {
       // Continue by selecting the specific plan
-      await this._page.click('button[data-test="search-by-plan-trigger"]');
+      const spSelect = 'button[data-test="search-by-plan-trigger"]';
+      await this._page.waitForSelector(spSelect);
+      await this._page.click(spSelect);
       await jitterWait(750, 750);
-      await this._page.click(
-        "button.rad-button.btn.mt-3.btn-link.btn-unstyled"
-      );
+      const rbSelect = "button.rad-button.btn.mt-3.btn-link.btn-unstyled";
+      await this._page.waitForSelector(rbSelect);
+      await this._page.click(rbSelect);
       await jitterWait(750, 750);
 
       // Search plan by name
       const spbnSelector = 'div[role="dialog"] input.form-control';
       await this._page.click(spbnSelector);
       await jitterWait(750, 750);
-      await this._page.type(spbnSelector, plan.name);
+      await this._page.type(spbnSelector, plan.name, 25);
 
       // Click the top link
       const topPlanSelector = 'button[data-test="planfix-plan"]';
@@ -287,34 +302,43 @@ export class BCBSSearch {
     }
 
     // Type in location
+    /**
     const inputSelector = "input#doctors-basics-location";
     await this._page.click(inputSelector);
     await this._page.repeatDeleteKey(50);
-    await this._page.type(inputSelector, "New York City, NY");
-
+    await this._page.type(inputSelector, "New York City, NY", 25);
     await jitterWait(500, 500);
+     */
 
     await this.selectProviderTypeAndSpecialties();
 
+    // Initiate the search by clicking form submission button
+    let searchResults = this.catchSearch();
+    this.declineFeedback().then(() => undefined);
     await this._page.clickAndWaitForNav('button[data-test="as-submit-form"]');
 
-    const searchResults = this.catchSearch();
-    await this.setPageNumberAndRadius();
-    return searchResults;
-  }
+    // Wait for the search results to return
+    const possibleReturnValue = await searchResults;
 
-  async setPageNumberAndRadius() {
-    let href = await this._page.href();
-    href = href.replace("radius=25", "radius=" + SEARCH_RADIUS);
-
-    if (this._pageIndex > 1) {
-      href = href.replace("page=1", "page=" + this._pageIndex);
+    // Check to see if we need to modify anything about the search since you
+    // can not select radius from the advanced page
+    const href = await this._page.href();
+    let newLoc = href.replace("radius=25", "radius=" + SEARCH_RADIUS);
+    if (this._pageIndex > 0) {
+      newLoc = newLoc.replace("page=1", "page=" + (this._pageIndex + 1));
     }
 
-    await jitterWait(250, 250);
+    // If there's nothing to change, return the search results we caught
+    if (href === newLoc) {
+      return possibleReturnValue;
+    }
 
+    // Otherwise we need to redirect, so do so and resend results
+    l("Search params need updating. Redirecting");
     this.declineFeedback().then(() => undefined);
-    return this._page.goThenWait(href);
+    searchResults = this.catchSearch();
+    await this._page.goThenWait(newLoc);
+    return searchResults;
   }
 
   nextSearch() {
@@ -349,7 +373,7 @@ export class BCBSSearch {
     await this._page.click(buttonSelector);
     this.declineFeedback().then(() => undefined);
     this._pageIndex++;
-    l("Moving to page " + this._pageIndex);
+    l("Moving to page " + (this._pageIndex + 1));
     return promise;
   }
 }

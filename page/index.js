@@ -115,8 +115,11 @@ export default class Page {
     return this.do(() => JSON.stringify(sessionStorage));
   }
 
-  async waitForSelector(selector) {
-    return this._page.waitForSelector(selector, { visible: true });
+  async waitForSelector(selector, delay) {
+    return this._page.waitForSelector(selector, {
+      visible: true,
+      delay: delay ? delay : 300000
+    });
   }
 
   async waitForXPath(path) {
@@ -158,7 +161,7 @@ export default class Page {
   async repeatDeleteKey(count) {
     const promises = [];
     for (let i = 0; i < count; i++) {
-      promises.push(this._page.keyboard.press('Backspace'));
+      promises.push(this._page.keyboard.press("Backspace"));
     }
     return Promise.all(promises);
   }
