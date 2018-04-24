@@ -201,8 +201,8 @@ export class BCBSSearch {
 
   async selectProvider(idx) {
     const selector =
-      'div[data-test="as-provider-type-section-body"] > div > div > ' +
-      "div:nth-child(" +
+      'div[data-test="as-provider-type-section-body"] > div > ' +
+      "div.ember-view > div:nth-child(" +
       (idx + 1) +
       ") > div.form-group > label";
 

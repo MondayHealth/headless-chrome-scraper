@@ -1,14 +1,14 @@
 import List from "./list";
 import Detail from "./detail";
 
-export async function scanProviders(browser, redis) {
+async function scanProviders(browser, redis) {
   const a = new List(browser, redis);
   await a.initialize();
   await a.scanProviders();
   await a.destroy();
 }
 
-export async function loadDetail(browser, redis) {
+async function loadDetail(browser, redis) {
   const detail = new Detail(browser, redis);
   const initPromise = detail.initialize();
   await initPromise;
@@ -17,4 +17,9 @@ export async function loadDetail(browser, redis) {
 
   console.log("Cleaning up");
   await detail.destroy();
+}
+
+export async function crawl(browser, redis) {
+  await scanProviders(browser, redis);
+  await loadDetail(browser, redis);
 }

@@ -245,6 +245,12 @@ export default class Crawl {
     await this.updateDetailCookieString();
 
     const providers = results.providers;
+
+    if (!providers) {
+      e("No providers structure in results!");
+      console.log(results);
+      process.exit(1);
+    }
     const count = providers.length;
 
     const promises = [];

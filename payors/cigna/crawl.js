@@ -1,15 +1,29 @@
 import Page from "../../page";
 import { jitterWait } from "../time-utils";
+import { l } from "../log";
 
 const BASE = "https://hcpdirectory.cigna.com/web/public/providers";
 
-const SEARCH_RADIUS = 30;
+const SPECIALTIES = [
+  "Psychiatry, Child & Adolescent",
+  "Counseling",
+  "Psychiatry",
+  "Psychology",
+  "Psychology, Neurological",
+  "Social Work",
+  "Counseling"
+];
 
 export default class Crawl {
   constructor(browser, redis) {
     this._browser = browser;
     this._page = null;
     this._ua = null;
+
+    this._lastSearchHeaders = null;
+    this._lastURL = null;
+
+    this._currentSpecialtyIndex = 0;
   }
 
   /**
@@ -31,13 +45,84 @@ export default class Crawl {
       );
     }, select);
 
-    const p2 = this._page.$$(select);
+    const p2 = this._page.$$(select + " > input");
 
     return Promise.all([p1, p2]);
   }
 
-  async crawl() {
-    // Put this in the right place
+  async clickApply() {
+    // Click the search button
+    const searchButton =
+      "#filterP > div > div.drawer-content > " +
+      "div.filter-action-buttons > " +
+      "a.cigna-button.cigna-button-purple-light";
+
+    const c = this.catchSearch();
+    await this._page.click(searchButton);
+    return c;
+  }
+
+  /**
+   * Catch the first search request that happens on the page and return the
+   * contents
+   * @returns {Promise<Array.<Object>>}
+   */
+  async catchSearch() {
+    const v =
+      "https://hcpdirectory.cigna.com/web/public/providers/searchresults";
+    return new Promise(resolve => {
+      const stop = this._page.onResponse(response => {
+        if (response.url().indexOf(v) !== 0) {
+          return;
+        }
+
+        this._lastSearchHeaders = response.request().headers();
+        this._lastURL = response.url();
+
+        l("Caught search results");
+
+        response.text().then(body => {
+          stop();
+          resolve(body);
+        });
+      });
+    });
+  }
+
+  async clickMoreResults() {
+    const selector = "button.nfinite-scroll-trigger.cigna-button";
+    const c = this.catchSearch();
+    await this._page.click(selector);
+    return c;
+  }
+
+  async resetSearch() {
+    const resetLink = "#filterClearAllP";
+    const c = this.catchSearch();
+    await this._page.click(resetLink);
+    return c;
+  }
+
+  async applySpecialty() {
+    const [specialties, elements] = await this.getSpecialties();
+    const idx = specialties.indexOf(SPECIALTIES[this._currentSpecialtyIndex]);
+    console.assert(idx > -1);
+    await elements[idx].click;
+    await jitterWait(500, 250);
+    return this.clickApply();
+  }
+
+  async processSearchResults(results) {
+    l("This is where i'd process search results");
+    console.log(this._lastSearchHeaders.Cookie);
+  }
+
+  async setupNewPage() {
+    if (this._page) {
+      this._page.close();
+      this._page = null;
+    }
+
     const page = await Page.newPageFromBrowser(this._browser);
     this._page = page;
     this._ua = page.getUserAgent();
@@ -52,6 +137,7 @@ export default class Crawl {
     await page.clickAndWaitForNav("button#search");
     await jitterWait(500, 500);
 
+    // Drag the distance selector
     const selector = "span.ui-slider-handle.ui-state-default.ui-corner-all";
     await page.waitForSelector(selector);
     const handle = await page.$(selector);
@@ -59,28 +145,40 @@ export default class Crawl {
     const mouse = page.mouse();
     await mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await mouse.down();
-    await jitterWait(100, 100);
-
-    // This is a rough calculation of how many pixels constitutes a mile
-    // from a bunch of experimentation i did.
-    await mouse.move(Math.ceil(5 * SEARCH_RADIUS), 0);
+    await jitterWait(250, 100);
+    await mouse.move(200, 0);
     await mouse.up();
+    await jitterWait(250, 300);
+    await this.clickApply();
+    await jitterWait(250, 300);
+  }
 
-    const [specialties, elements] = await this.getSpecialties();
+  async crawl() {
+    await this.setupNewPage();
 
-    console.log(specialties);
+    do {
+      let result = await this.applySpecialty();
+      await Promise.all([
+        this.processSearchResults(result),
+        jitterWait(750, 250)
+      ]);
 
-    const desired = [
-      "Counseling",
-      "Psychiatry",
-      "Psychology",
-      "Psychology, Neurological",
-      "Social Work",
-      "Counseling"
-    ].map(elt => elements[specialties.indexOf(elt)]);
+      result = await this.clickMoreResults();
+      await Promise.all([
+        this.processSearchResults(result),
+        jitterWait(750, 250)
+      ]);
 
-    await Promise.all(desired.map(value => value.click()));
+      // Continue making requests until
 
-    console.log("wait");
+      // Save query position?
+
+      await this.resetSearch();
+    } while (++this._currentSpecialtyIndex < SPECIALTIES.length);
+
+    l("Search appears to be completed.");
+
+    await this._page.close();
+    this._page = null;
   }
 }
