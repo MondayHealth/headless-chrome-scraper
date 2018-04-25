@@ -1,6 +1,7 @@
 import Page from "../../page";
-import { jitterWait } from "../time-utils";
+import { jitterWait, wait } from "../time-utils";
 import { l } from "../log";
+import cheerio from "cheerio";
 
 const BASE = "https://hcpdirectory.cigna.com/web/public/providers";
 
@@ -20,8 +21,11 @@ export default class Crawl {
     this._page = null;
     this._ua = null;
 
+    this._cookie = null;
     this._lastSearchHeaders = null;
     this._lastURL = null;
+
+    this._paginationData = null;
 
     this._currentSpecialtyIndex = 0;
   }
@@ -59,7 +63,11 @@ export default class Crawl {
 
     const c = this.catchSearch();
     await this._page.click(searchButton);
-    return c;
+    const ret = await c;
+    await wait(500);
+    await this.updatePaginationData();
+    this._cookie = this._page.do(() => document.cookie);
+    return ret;
   }
 
   /**
@@ -91,9 +99,19 @@ export default class Crawl {
 
   async clickMoreResults() {
     const selector = "button.nfinite-scroll-trigger.cigna-button";
+    const elt = await this._page.$(selector);
+
+    if (!elt) {
+      return null;
+    }
+
     const c = this.catchSearch();
-    await this._page.click(selector);
-    return c;
+    await elt.click();
+    const ret = await c;
+    await wait(500);
+    await this.updatePaginationData();
+    this._cookie = this._page.do(() => document.cookie);
+    return ret;
   }
 
   async resetSearch() {
@@ -107,14 +125,30 @@ export default class Crawl {
     const [specialties, elements] = await this.getSpecialties();
     const idx = specialties.indexOf(SPECIALTIES[this._currentSpecialtyIndex]);
     console.assert(idx > -1);
-    await elements[idx].click;
+    await elements[idx].click();
     await jitterWait(500, 250);
     return this.clickApply();
   }
 
-  async processSearchResults(results) {
+  async processSearchResults(rawHTML) {
     l("This is where i'd process search results");
-    console.log(this._lastSearchHeaders.Cookie);
+    const $ = cheerio.load(rawHTML);
+    console.log($);
+  }
+
+  async updatePaginationData() {
+    const nFiniteSelector = "div.nfinite-scroll-container";
+    this._paginationData = await this._page.do(selector => {
+      // noinspection JSUnresolvedVariable
+      const v = document.querySelector(selector).attributes;
+      const len = v.length;
+      const ret = {};
+      for (let i = 0; i < len; i++) {
+        let item = v.item(i);
+        ret[item.name] = item.value;
+      }
+      return ret;
+    }, nFiniteSelector);
   }
 
   async setupNewPage() {
@@ -157,21 +191,18 @@ export default class Crawl {
     await this.setupNewPage();
 
     do {
-      let result = await this.applySpecialty();
-      await Promise.all([
-        this.processSearchResults(result),
-        jitterWait(750, 250)
-      ]);
+      await this.applySpecialty();
 
-      result = await this.clickMoreResults();
-      await Promise.all([
-        this.processSearchResults(result),
-        jitterWait(750, 250)
-      ]);
+      let results = await this.clickApply();
 
-      // Continue making requests until
+      await this.processSearchResults(results);
 
-      // Save query position?
+      results = await this.clickMoreResults();
+
+      await this.processSearchResults(results);
+
+
+
 
       await this.resetSearch();
     } while (++this._currentSpecialtyIndex < SPECIALTIES.length);

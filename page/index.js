@@ -118,7 +118,7 @@ export default class Page {
   async waitForSelector(selector, delay) {
     return this._page.waitForSelector(selector, {
       visible: true,
-      delay: delay ? delay : 300000
+      timeout: delay ? delay : 300000
     });
   }
 
@@ -154,8 +154,11 @@ export default class Page {
     return Promise.all([navPromise, clickPromise]);
   }
 
-  async goThenWait(url) {
-    return this.go(url, { waitUntil: "networkidle2" });
+  async goThenWait(url, idle, timeout) {
+    return this.go(url, {
+      waitUntil: "networkidle" + (idle ? 0 : 2),
+      timeout: timeout ? timeout : 30000
+    });
   }
 
   async repeatDeleteKey(count) {
@@ -172,5 +175,11 @@ export default class Page {
 
   async go(url, opts) {
     return this._page.goto(url, opts || {});
+  }
+
+  async reloadWithCacheOff(idle) {
+    await this._page.setCacheEnabled(false);
+    await this._page.reload({ waitUntil: "networkidle" + (idle ? 0 : 2) });
+    return this._page.setCacheEnabled(true);
   }
 }

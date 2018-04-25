@@ -5,7 +5,7 @@
 
 import { l } from "../log";
 import { FEDERAL, PLANS, SEARCH_SETTINGS, SEARCHES } from "./data";
-import { jitterWait } from "../time-utils";
+import { jitterWait, wait } from "../time-utils";
 import { promisify } from "util";
 
 const ADVANCED_SEARCH_SUFFIX =
@@ -153,7 +153,7 @@ export class BCBSSearch {
   async declineFeedback() {
     const selector = "a.acsInviteButton.acsDeclineButton";
     try {
-      await this._page.waitForSelector(selector, 10000);
+      await this._page.waitForSelector(selector, 4000);
       await jitterWait(250, 250);
       await this._page.click(selector);
       l("Feedback declined.", "=");
@@ -189,12 +189,16 @@ export class BCBSSearch {
 
     await this._page.waitForSelector(sel);
 
+    await wait(1000);
+
     return this._page.do(selector => {
       // noinspection JSUnresolvedVariable
       const b = document.querySelector(selector);
       // noinspection JSUnresolvedFunction
       return Array.from(
-        b.querySelectorAll("span.custom-control-description")
+        b.querySelectorAll(
+          "label.custom-radio > span.custom-control-description"
+        )
       ).map(s => s.innerHTML);
     }, sel);
   }
@@ -271,9 +275,8 @@ export class BCBSSearch {
     l(this.describeSearch(), ">");
 
     const url = `https://${this.domain()}/${ADVANCED_SEARCH_SUFFIX}`;
-    l("Waiting to to make sure feedback popup isnt there");
-    await this._page.goThenWait(url);
-    await this.declineFeedback();
+    l("Going to search page and waiting for networkidle0");
+    await this._page.goThenWait(url, true, 90000);
 
     const plan = this.getCurrentPlan();
 
@@ -282,6 +285,11 @@ export class BCBSSearch {
       // Continue by selecting the specific plan
       const spSelect = 'button[data-test="search-by-plan-trigger"]';
       await this._page.waitForSelector(spSelect);
+
+      // Don't start doing anything until this goes away
+      l("Waiting to to make sure feedback popup isnt there");
+      await this.declineFeedback();
+
       await this._page.click(spSelect);
       await jitterWait(750, 750);
       const rbSelect = "button.rad-button.btn.mt-3.btn-link.btn-unstyled";
@@ -302,6 +310,9 @@ export class BCBSSearch {
       await this._page.waitForSelector(topPlanSelector);
       await this._page.click(topPlanSelector);
       await jitterWait(750, 750);
+    } else {
+      // Don't start doing anything until this goes away
+      await this.declineFeedback();
     }
 
     // Type in location. This may not be necessary if the scrape is run in NYC
@@ -366,7 +377,7 @@ export class BCBSSearch {
    */
   async nextPage() {
     const buttonSelector = 'button[data-test="right-arrow-pagination-link"]';
-    const element = await this._page.$(buttonSelector);
+    let element = await this._page.$(buttonSelector);
 
     if (!element) {
       return null;
@@ -377,6 +388,8 @@ export class BCBSSearch {
     this.declineFeedback().then(() => undefined);
     this._pageIndex++;
     l("Moving to page " + this._pageIndex);
+    await this._page.waitForSelector("div.js-headerContainer");
+    l("Moved to page " + this._pageIndex);
     return promise;
   }
 }
