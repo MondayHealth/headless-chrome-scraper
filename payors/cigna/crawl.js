@@ -1,6 +1,6 @@
 import Page from "../../page";
 import { jitterWait, wait } from "../time-utils";
-import { e, l } from "../log";
+import { e, l, w } from "../log";
 import cheerio from "cheerio";
 import { promisify } from "util";
 
@@ -93,6 +93,7 @@ export default class Crawl {
   catchSearch() {
     const v =
       "https://hcpdirectory.cigna.com/web/public/providers/searchresults";
+
     return this._page.onResponse(response => {
       if (response.url().indexOf(v) !== 0) {
         return;
@@ -175,7 +176,7 @@ export default class Crawl {
     await this.clickApply();
   }
 
-  saveList(uid, stripped, name) {
+  saveListing(uid, stripped, name) {
     this._rHSet(PROVIDER_LIST_KEY, uid, stripped).then(result =>
       l(`${uid} : ${name}`, !!result ? "+" : "o")
     );
@@ -187,22 +188,40 @@ export default class Crawl {
       $ = cheerio.load(rawHTML);
     } catch (e) {
       console.log(e);
-      return;
+      return 0;
     }
 
-    this._currentPage++;
+    // This is to be expected.
+    if ($("div.filter-options").length) {
+      return -1;
+    }
 
-    const result = $("tr[data-search-result-id]");
+    // noinspection JSJQueryEfficiency
+    let result = $("td");
+
+    let length = result.length;
+
+    if (length < 1) {
+      $ = cheerio.load(`<table>${rawHTML}</table>`);
+      result = $("td");
+      length = result.length;
+    }
+
+    if (length < 1) {
+      w(`Zero results found in raw search results.`);
+      return 0;
+    }
+
     result.each((i, el) => {
       const capture = $(el);
       const a = capture.find("a[name]").eq(0);
       const uid = a.attr("name");
       const name = a.text();
       const stripped = capture.html().replace(/[\t\n\r]/gm, "");
-      this.saveList(uid, stripped, name);
+      this.saveListing(uid, stripped, name);
     });
 
-    console.log("result count", result.get().length);
+    return length;
   }
 
   async updatePaginationData() {
@@ -256,18 +275,24 @@ export default class Crawl {
   describeSearch() {
     return `${
       SPECIALTIES[this._currentSpecialtyIndex]
-    } (${this.totalResults()} records, ${this.totalPages()} pages)`;
+    } (${this.totalResults()} records, ${
+      this._currentPage
+    } / ${this.totalPages()} pages)`;
   }
 
   async searchIsEnded() {
     const s = ".nfinite-scroll-trigger.cigna-button.cigna-button-purple-light";
-    return this._page.do(sel => {
+    const ret = this._page.do(sel => {
       const elt = document.querySelector(sel);
       if (!elt) {
         return false;
       }
       return elt.nextSibling ? !!elt.nextSibling.nextSibling : false;
     }, s);
+
+    if (ret) {
+      l(`Reached the end of ${this.describeSearch()}`);
+    }
   }
 
   async crawl() {
@@ -289,8 +314,8 @@ export default class Crawl {
       l(this.describeSearch());
 
       while (
-        this._currentPage < this.totalPages() ||
-        (await this.searchIsEnded())
+        this._currentPage < this.totalPages() &&
+        !(await this.searchIsEnded())
       ) {
         await this.moreResults();
       }
