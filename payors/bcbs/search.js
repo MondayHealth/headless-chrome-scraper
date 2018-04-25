@@ -3,10 +3,12 @@
  link to them.
  */
 
-import { l } from "../log";
+import { e, l, w } from "../log";
 import { FEDERAL, PLANS, SEARCH_SETTINGS, SEARCHES } from "./data";
 import { jitterWait, wait } from "../time-utils";
 import { promisify } from "util";
+
+export const RETRY = Symbol("RETRY");
 
 const ADVANCED_SEARCH_SUFFIX =
   "app/public/#/one/city=&" +
@@ -79,6 +81,7 @@ export class BCBSSearch {
       this._searchConfigurationIndex,
       this._pageIndex
     ];
+    l(`Stored search state ${state}`);
     return this._rHSet(SEARCH_KEY, "searchState", JSON.stringify(state));
   }
 
@@ -128,7 +131,30 @@ export class BCBSSearch {
    */
   async catchSearch() {
     return new Promise(resolve => {
-      const stop = this._page.onResponse(response => {
+      const timeout = setTimeout(() => {
+        e(`Waited for search result for more than five minutes!`);
+        process.exit(1);
+      }, 5 * 60 * 1000);
+
+      let stop = null;
+
+      const stopFailureCheck = this._page.onRequestFailed(request => {
+        if (request.url().indexOf("public/service/search") < 0) {
+          return;
+        }
+
+        w(`Request failed for URL ${request.url()}!`);
+
+        if (stop) {
+          stop();
+        }
+
+        stopFailureCheck();
+
+        resolve(RETRY);
+      });
+
+      stop = this._page.onResponse(response => {
         if (response.url().indexOf("public/service/search") < 0) {
           return;
         }
@@ -139,6 +165,8 @@ export class BCBSSearch {
         l("Caught search results");
 
         response.text().then(body => {
+          clearTimeout(timeout);
+          stopFailureCheck();
           stop();
           resolve(JSON.parse(body));
         });

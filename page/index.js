@@ -51,6 +51,11 @@ export default class Page {
     return () => this._page.removeListener("response", callback);
   }
 
+  onRequestFailed(callback) {
+    this._page.on("requestfailed", callback);
+    return () => this._page.removeListener("requestfailed", callback);
+  }
+
   async setRequestInterception() {
     return this._page.setRequestInterception(true);
   }

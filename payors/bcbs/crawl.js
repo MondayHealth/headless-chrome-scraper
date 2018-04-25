@@ -3,7 +3,7 @@ import { promisify } from "util";
 import { e, l, w } from "../log";
 import { jitterWait } from "../time-utils";
 import request from "request";
-import { BCBSSearch } from "./search";
+import { BCBSSearch, RETRY } from "./search";
 
 const PROVIDER_KEY = "bcbs:providers";
 
@@ -98,6 +98,9 @@ export default class Crawl {
    * @returns {Promise<Object>}
    */
   async getProviderDetail(providerID, locationID) {
+    console.assert(providerID);
+    console.assert(locationID);
+
     const headers = this.getDetailRequestHeaders();
 
     const queryParams = Crawl.queryStringForObject({
@@ -116,46 +119,69 @@ export default class Crawl {
     const gzip = true;
     const domain = this._search.domain();
     const base = `https://${domain}/healthsparq/public/service/profile`;
+    const timeout = 120 * 1000;
     const url = base + "?" + queryParams;
 
     return new Promise((resolve, reject) => {
-      request({ url, json, headers, gzip }, (error, response, body) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-
-        if (response.statusCode !== 200) {
-          console.error("Req failed: " + response.statusCode);
-          reject(body);
-          return;
-        }
-
-        if (body.error) {
-          // noinspection JSUnresolvedVariable
-          switch (body.error.errorId) {
-            case "SE001011":
-              e("Invalid provider info for " + providerID + " / " + locationID);
+      request(
+        { url, json, headers, gzip, timeout },
+        (error, response, body) => {
+          // Read more about errors here:
+          // https://github.com/request/request#timeouts
+          if (error) {
+            if (error.code === "ETIMEDOUT") {
+              if (error.connect) {
+                e(`Request connection timeout.`);
+              } else {
+                e(`Request read timeout.`);
+              }
+              l(url);
               resolve(null);
               return;
-            default:
-              e(`Unknown error for ${providerID}/${locationID}`);
-              reject(body);
-              return;
+            }
+
+            reject(error);
+            return;
           }
-        }
 
-        // noinspection JSUnresolvedVariable
-        if (!body.provider) {
-          console.warn("No provider");
-          console.log(body);
-        } else if (Object.keys(body.provider).length < 50) {
-          console.warn("Detail strangely short for provider");
-          console.log(body);
-        }
+          if (response.statusCode !== 200) {
+            console.error("Req failed: " + response.statusCode);
+            if (response.statusCode >= 500) {
+              resolve(RETRY);
+            } else {
+              reject(body);
+            }
+            return;
+          }
 
-        resolve(body);
-      });
+          if (body.error) {
+            // noinspection JSUnresolvedVariable
+            switch (body.error.errorId) {
+              case "SE001011":
+                e(
+                  "Invalid provider info for " + providerID + " / " + locationID
+                );
+                resolve(null);
+                return;
+              default:
+                e(`Unknown error for ${providerID}/${locationID}`);
+                reject(body);
+                return;
+            }
+          }
+
+          // noinspection JSUnresolvedVariable
+          if (!body.provider) {
+            console.warn("No provider");
+            console.log(body);
+          } else if (Object.keys(body.provider).length < 50) {
+            console.warn("Detail strangely short for provider");
+            console.log(body);
+          }
+
+          resolve(body);
+        }
+      );
     });
   }
 
@@ -213,12 +239,13 @@ export default class Crawl {
    */
   async getDetail(listing) {
     // noinspection JSUnresolvedVariable
-    let lid = listing.bestLocation
+    const lid = listing.bestLocation
       ? listing.bestLocation.id
       : listing.locations[0].id;
 
-    let pid = listing.id;
-    let detail = await this.getProviderDetail(pid, lid);
+    const pid = listing.id;
+    const fxn = this.getProviderDetail.bind(this, pid, lid);
+    const detail = await Crawl.retryWrapper(fxn, 3);
 
     if (!detail) {
       w(`Only partial data for ${listing.fullName}`);
@@ -255,6 +282,8 @@ export default class Crawl {
 
     const promises = [];
 
+    l(`Initiate retrieval of ${count} detail results`);
+
     for (let i = 0; i < count; i++) {
       promises.push(this.getDetail(providers[i]));
       await jitterWait(750, 500);
@@ -271,16 +300,38 @@ export default class Crawl {
   async conductSearch() {
     await jitterWait(1000, 1000);
 
-    let searchResults = await this._search.beginSearch();
+    const begin = this._search.beginSearch.bind(this._search);
+    const next = this._search.nextPage.bind(this._search);
+
+    let searchResults = await Crawl.retryWrapper(begin, 3);
 
     while (searchResults) {
       await this._search.storeSearchState();
       await this.processSearchResults(searchResults);
-      await jitterWait(1000, 1000);
-      searchResults = await this._search.nextPage();
+      await jitterWait(500, 500);
+      searchResults = await Crawl.retryWrapper(next, 7);
     }
 
     l("Search complete");
+  }
+
+  static async retryWrapper(fxn, count) {
+    let searchResults = await fxn();
+    let retryCount = 0;
+
+    while (searchResults === RETRY) {
+      if (retryCount++ >= count) {
+        e(`Too many retries (r > ${count}). Failing.`);
+        process.exit(1);
+      }
+
+      w(`Caught retry, waiting about 10 seconds to retry.`);
+      await jitterWait(10000, 1000);
+      l(`Retrying.`);
+      searchResults = await fxn();
+    }
+
+    return searchResults;
   }
 
   async crawl() {
