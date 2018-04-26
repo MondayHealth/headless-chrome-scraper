@@ -231,6 +231,40 @@ export class BCBSSearch {
     }, sel);
   }
 
+  /**
+   *
+   * @returns {Promise<Array.<string>>}
+   */
+  async createProviderSubOptionMap() {
+    const sel = 'div[data-test="as-provider-type-section-body"]';
+
+    await this._page.waitForSelector(sel);
+
+    await wait(1000);
+
+    return this._page.do(selector => {
+      // noinspection JSUnresolvedVariable
+      const b = document.querySelector(selector);
+      // noinspection JSUnresolvedFunction
+      return Array.from(
+        b.querySelectorAll(
+          "label.custom-checkbox > span.custom-control-description"
+        )
+      ).map(s => s.innerHTML);
+    }, sel);
+  }
+
+  async selectProviderSubOption(idx) {
+    const elts = await this._page.$$(
+      'div[data-test="as-provider-type-section-body"] label.custom-checkbox'
+    );
+
+    console.assert(elts.length);
+
+    await elts[idx].click();
+    return jitterWait(250, 500);
+  }
+
   async selectProvider(idx) {
     const selector =
       'div[data-test="as-provider-type-section-body"] > div > ' +
@@ -269,9 +303,12 @@ export class BCBSSearch {
   }
 
   async selectProviderTypeAndSpecialties() {
-    const { providerName, specialtyNames } = SEARCH_SETTINGS[
-      this.getCurrentConfiguration()
-    ];
+    const {
+      providerName,
+      specialtyNames,
+      requireProviderSelection,
+      subOptions
+    } = SEARCH_SETTINGS[this.getCurrentConfiguration()];
 
     // Select the provider type by index
     const providerMap = await this.createProviderMap();
@@ -285,6 +322,8 @@ export class BCBSSearch {
 
     const specs = await this.createSpecialtyMap();
 
+    let selected = 0;
+
     for (let i = 0; i < specialtyNames.length; i++) {
       let idx = specs.indexOf(specialtyNames[i]);
       if (idx < 0) {
@@ -296,7 +335,16 @@ export class BCBSSearch {
         continue;
       }
       await this.selectSpecialty(idx);
+      selected++;
     }
+
+    if (!selected && requireProviderSelection) {
+      e(`Failed to select ANY providers for ${this.currentPlanName()}!`);
+      console.log(specs);
+      return false;
+    }
+
+    return true;
   }
 
   async beginSearch() {
@@ -352,7 +400,11 @@ export class BCBSSearch {
     await jitterWait(500, 500);
      */
 
-    await this.selectProviderTypeAndSpecialties();
+    if (!await this.selectProviderTypeAndSpecialties())
+    {
+      w("Plan / provider combination appears to be invalid. Skipping.");
+      return null;
+    }
 
     // Initiate the search by clicking form submission button
     let searchResults = this.catchSearch();

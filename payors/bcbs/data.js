@@ -13,6 +13,8 @@ export const PLANS = [
     name: "New York, BlueCross & BlueShield of Western",
     productCode: "NYNY8M"
   },
+
+  // Cant search for physicians
   {
     name: "New York, BlueShield of Northeastern",
     productCode: "NYNY0M"
@@ -50,7 +52,8 @@ export const SEARCH_SETTINGS = {
       "Nursing - Psychiatry",
       "Physician Assistant - Psychiatry",
       "Psychiatric Nurse"
-    ]
+    ],
+    requireProviderSelection: true
   },
 
   [PHYSICIAN]: {
@@ -61,8 +64,11 @@ export const SEARCH_SETTINGS = {
       "Child Psychiatry",
       "Psychiatry &amp; Neurology",
       "Psychiatry",
-      "Psychoanalysis"
-    ]
+      "Psychoanalysis",
+      "Behavioral/Mental Health"
+    ],
+    subOptions: ["Behavioral/Mental Health"],
+    requireProviderSelection: true
   },
 
   [COUNSELOR]: { providerName: "Counselor/Therapist", specialtyNames: [] }

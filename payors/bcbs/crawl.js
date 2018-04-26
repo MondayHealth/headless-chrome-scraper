@@ -22,6 +22,8 @@ export default class Crawl {
     this._rHSet = promisify(redis.hset).bind(redis);
     // noinspection JSUnresolvedVariable
     this._rHGet = promisify(redis.hget).bind(redis);
+    // noinspection JSUnresolvedVariable
+    this._rHDel = promisify(redis.hdel).bind(redis);
 
     /**
      *
@@ -244,6 +246,16 @@ export default class Crawl {
       : listing.locations[0].id;
 
     const pid = listing.id;
+    const uid = pid + ":" + lid;
+
+    /**
+     * Use this code block to delete providers instead of save them
+    await this._rHDel(PROVIDER_KEY, uid);
+    // noinspection JSUnresolvedVariable
+    l(listing.fullName + ", " + listing.credentialDegreeLabel, "$");
+    return;
+     */
+
     const fxn = this.getProviderDetail.bind(this, pid, lid);
     const detail = await Crawl.retryWrapper(fxn, 3);
 
@@ -252,11 +264,15 @@ export default class Crawl {
     }
 
     let data = JSON.stringify({ listing, detail });
-    let uid = pid + ":" + lid;
     let added = await this._rHSet(PROVIDER_KEY, uid, data);
     // noinspection JSUnresolvedVariable
     l(
-      listing.fullName + ", " + listing.credentialDegreeLabel,
+      listing.fullName +
+        ", " +
+        listing.credentialDegreeLabel +
+        " (" +
+        uid +
+        ")",
       !!added ? "+" : "o"
     );
   }
