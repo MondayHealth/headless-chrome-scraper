@@ -354,6 +354,14 @@ export default class Crawl {
     this._page = await Page.newPageFromBrowser(this._browser);
     this._ua = this._page.getUserAgent();
 
+    // BCBS appears to crash chrome pages sometimes and there doesnt appear
+    // to be an elegant way to handle this.
+    this._page._page.on("error", error => {
+      e("It appears the page has crashed.");
+      console.log(error);
+      process.exit(1);
+    });
+
     this._search.setPage(this._page);
     await this._search.loadSearchState();
 

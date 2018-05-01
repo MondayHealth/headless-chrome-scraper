@@ -3,23 +3,23 @@ import { jitterWait, wait } from "../time-utils";
 import { e, l, w } from "../log";
 import cheerio from "cheerio";
 import { promisify } from "util";
+import Requestor from "./requestor";
 
 const BASE = "https://hcpdirectory.cigna.com/web/public/providers";
 
-const SPECIALTIES = [
-  "Psychiatry, Child & Adolescent",
-  "Counseling",
-  "Psychiatry",
-  "Psychology",
-  "Psychology, Neurological",
-  "Social Work",
-  "Counseling"
+const SEARCHES = [
+  "Behavioral Health Provider: Mental Health Counselor",
+  "Behavioral Health Provider: Psychiatrist",
+  "Behavioral Health Provider: Psychologist",
+  "Behavioral Health Provider: Social Work"
 ];
 
 const noop = () => undefined;
 
 const document = {
-  querySelector: noop,
+  querySelector: s => {
+    return { s, innerHTML: "foo" };
+  },
   querySelectorAll: noop,
   body: { clientHeight: 0 }
 };
@@ -36,14 +36,10 @@ export default class Crawl {
     this._page = null;
     this._ua = null;
 
-    this._cookie = null;
-    this._lastSearchHeaders = null;
-    this._lastURL = null;
-
     this._paginationData = null;
     this._currentPage = 1;
 
-    this._currentSpecialtyIndex = 0;
+    this._currentSearchIndex = 0;
 
     // noinspection JSUnresolvedVariable
     this._rHSet = promisify(redis.hset).bind(redis);
@@ -51,28 +47,17 @@ export default class Crawl {
     this._rHGet = promisify(redis.hget).bind(redis);
   }
 
-  /**
-   *
-   * @returns {Promise<*[]>}
-   */
-  async getSpecialties() {
-    const select =
-      "#filterP > div > div.drawer-content > div.directory-facets-group > " +
-      "div > div > div:nth-child(2) > fieldset > div > label";
+  async checkPageForRateLimit() {
+    const selector = await this._page.$("h1");
+    if (!selector) {
+      return;
+    }
 
-    const p1 = this._page.do(selector => {
-      // noinspection JSUnresolvedVariable
-      return Array.from(document.querySelectorAll(selector)).map(a =>
-        a.textContent
-          .trim()
-          .split("\n")[0]
-          .trim()
-      );
-    }, select);
+    const innerHTML = await this._page.do(
+      () => document.querySelector("h1").innerHTML
+    );
 
-    const p2 = this._page.$$(select + " > input");
-
-    return Promise.all([p1, p2]);
+    return innerHTML === "Hold up there!";
   }
 
   async clickApply() {
@@ -90,20 +75,26 @@ export default class Crawl {
    * contents
    * @returns {Function}
    */
-  catchSearch() {
+  async catchSearch() {
     const v =
       "https://hcpdirectory.cigna.com/web/public/providers/searchresults";
 
-    return this._page.onResponse(response => {
+    const promises = [];
+
+    const stop = this._page.onResponse(response => {
       if (response.url().indexOf(v) !== 0) {
         return;
       }
 
-      this._lastSearchHeaders = response.request().headers();
-      this._lastURL = response.url();
-
-      response.text().then(body => this.processSearchResults(body));
+      promises.push(
+        response.text().then(body => this.processSearchResults(body))
+      );
     });
+
+    return async () => {
+      stop();
+      return Promise.all(promises);
+    };
   }
 
   async removeCurrentResults() {
@@ -147,33 +138,27 @@ export default class Crawl {
     return this._page.click(resetLink);
   }
 
-  async applySpecialty() {
-    const [specialties, elements] = await this.getSpecialties();
-    const specialtyName = SPECIALTIES[this._currentSpecialtyIndex];
-    const idx = specialties.indexOf(specialtyName);
-    if (idx < 0) {
-      e(`Problem finding specialty ${specialtyName}`);
-      process.exit(1);
-    }
-    await elements[idx].click();
-    await jitterWait(500, 250);
-    return this.clickApply();
-  }
-
   async applyDistance() {
+    // Get the bg
     // Drag the distance selector
     const selector = "span.ui-slider-handle.ui-state-default.ui-corner-all";
     await this._page.waitForSelector(selector);
     const handle = await this._page.$(selector);
+
+    // Get the bounding box of the background of the slider
+    const sliderBG = "div.slider-bg";
+    const bg = await this._page.$(sliderBG);
+    const bgBox = await bg.boundingBox();
+
     const box = await handle.boundingBox();
     const mouse = this._page.mouse();
-    await mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    const centerX = box.x + box.width / 2;
+    await mouse.move(centerX, box.y + box.height / 2);
     await mouse.down();
     await jitterWait(250, 100);
-    await mouse.move(200, 0);
+    await mouse.move(centerX + bgBox.width / 2.28, 0);
     await mouse.up();
     await jitterWait(500, 250);
-    await this.clickApply();
   }
 
   saveListing(uid, stripped, name) {
@@ -187,13 +172,14 @@ export default class Crawl {
     try {
       $ = cheerio.load(rawHTML);
     } catch (e) {
+      e(`Failed to parse search results`);
       console.log(e);
-      return 0;
+      process.exit(1);
     }
 
-    // This is to be expected.
+    // This is to be expected because of dumb webapps
     if ($("div.filter-options").length) {
-      return -1;
+      return;
     }
 
     // noinspection JSJQueryEfficiency
@@ -209,9 +195,10 @@ export default class Crawl {
 
     if (length < 1) {
       w(`Zero results found in raw search results.`);
-      return 0;
+      return;
     }
 
+    const scripts = [];
     result.each((i, el) => {
       const capture = $(el);
       const a = capture.find("a[name]").eq(0);
@@ -219,9 +206,31 @@ export default class Crawl {
       const name = a.text();
       const stripped = capture.html().replace(/[\t\n\r]/gm, "");
       this.saveListing(uid, stripped, name);
+
+      // Check this shit out
+      scripts.push(
+        new Function("return " + a.attr("onclick").slice(22, -15))()
+      );
     });
 
-    return length;
+    return this.getDetailFromScripts(scripts);
+  }
+
+  async getDetailFromScripts(scripts) {
+    const cookie = await this._page.cookies();
+    const ua = this._page.getUserAgent();
+    const href = await this._page.href();
+    const req = new Requestor(href, cookie, ua);
+    const count = scripts.length;
+
+    const promises = [];
+
+    for (let i = 0; i < count; i++) {
+      promises.push(req.getProvider(scripts[i]));
+      await jitterWait(250, 250);
+    }
+
+    return Promise.all(promises);
   }
 
   async updatePaginationData() {
@@ -240,24 +249,57 @@ export default class Crawl {
   }
 
   async setupNewPage() {
+    const search = SEARCHES[this._currentSearchIndex];
+    l(`Beginning new search: ${search}`);
+
+    // Do the new page boilerplate
     if (this._page) {
       this._page.close();
       this._page = null;
     }
-
     const page = await Page.newPageFromBrowser(this._browser);
     this._page = page;
     this._ua = page.getUserAgent();
+
     await page.goThenWait(BASE);
+
+    if (await this.checkPageForRateLimit()) {
+      e("Caught rate limit. Exiting.");
+      process.exit(1);
+    }
+
+    // Input location
     const searchSelector = "input#searchLocation";
+    await page.waitForSelector(searchSelector);
     await page.click(searchSelector);
     await jitterWait(250, 250);
     await page.repeatDeleteKey(50);
     await jitterWait(250, 250);
     await page.type(searchSelector, "New York, NY", 35);
     await jitterWait(500, 250);
-    await page.clickAndWaitForNav("button#search");
+
+    // Select the search entry
+    const termInputSelector = "input#searchTermOneBox";
+    await page.click(termInputSelector);
+    await jitterWait(250, 250);
+    await page.type(termInputSelector, search, 27);
+
+    // Click the first entry in the list
+    const topMenuItemSelector = "#ui-id-3 > li.ui-menu-item";
+    await page.waitForSelector(topMenuItemSelector);
+    await wait(500);
+    await page.clickAndWaitForNav(topMenuItemSelector);
+
+    // Wait for the "continue with my search" dialog
+    await jitterWait(1000, 1000);
+    const cwmsSelector = "#cbm-dialog-1 > div > div.margin-top-md > button";
+    await page.waitForSelector(cwmsSelector);
+    await page.click(cwmsSelector);
+
     await jitterWait(500, 500);
+
+    // Set the distance
+    return this.applyDistance();
   }
 
   totalResults() {
@@ -274,7 +316,7 @@ export default class Crawl {
 
   describeSearch() {
     return `${
-      SPECIALTIES[this._currentSpecialtyIndex]
+      SEARCHES[this._currentSearchIndex]
     } (${this.totalResults()} records, ${
       this._currentPage
     } / ${this.totalPages()} pages)`;
@@ -296,14 +338,8 @@ export default class Crawl {
   }
 
   async crawl() {
-    await this.setupNewPage();
-
     do {
-      await jitterWait(500, 500);
-      await this.applyDistance();
-      await jitterWait(500, 500);
-      await this.applySpecialty();
-      await jitterWait(500, 500);
+      await this.setupNewPage();
 
       let stopSearch = this.catchSearch();
 
@@ -320,12 +356,11 @@ export default class Crawl {
         await this.moreResults();
       }
 
-      stopSearch();
+      await stopSearch();
 
       await this.resetSearch();
-      await jitterWait(2000, 1000);
       l(`Finished ${this.describeSearch()}`);
-    } while (++this._currentSpecialtyIndex < SPECIALTIES.length);
+    } while (++this._currentSearchIndex < SEARCHES.length);
 
     l("Search appears to be completed.");
 

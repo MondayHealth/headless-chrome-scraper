@@ -306,7 +306,7 @@ export class BCBSSearch {
     const {
       providerName,
       specialtyNames,
-      requireProviderSelection,
+      requireSpecialtySelection,
       subOptions
     } = SEARCH_SETTINGS[this.getCurrentConfiguration()];
 
@@ -338,7 +338,7 @@ export class BCBSSearch {
       selected++;
     }
 
-    if (!selected && requireProviderSelection) {
+    if (!selected && requireSpecialtySelection) {
       e(`Failed to select ANY providers for ${this.currentPlanName()}!`);
       console.log(specs);
       return false;
@@ -400,8 +400,7 @@ export class BCBSSearch {
     await jitterWait(500, 500);
      */
 
-    if (!await this.selectProviderTypeAndSpecialties())
-    {
+    if (!(await this.selectProviderTypeAndSpecialties())) {
       w("Plan / provider combination appears to be invalid. Skipping.");
       return null;
     }
@@ -462,6 +461,8 @@ export class BCBSSearch {
     if (!element) {
       return null;
     }
+
+
 
     const promise = this.catchSearch();
     await this._page.click(buttonSelector);

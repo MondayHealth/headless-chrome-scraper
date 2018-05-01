@@ -53,7 +53,7 @@ export const SEARCH_SETTINGS = {
       "Physician Assistant - Psychiatry",
       "Psychiatric Nurse"
     ],
-    requireProviderSelection: true
+    requireSpecialtySelection: true
   },
 
   [PHYSICIAN]: {
@@ -68,7 +68,7 @@ export const SEARCH_SETTINGS = {
       "Behavioral/Mental Health"
     ],
     subOptions: ["Behavioral/Mental Health"],
-    requireProviderSelection: true
+    requireSpecialtySelection: true
   },
 
   [COUNSELOR]: { providerName: "Counselor/Therapist", specialtyNames: [] }
