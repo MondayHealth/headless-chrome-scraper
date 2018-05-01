@@ -1,6 +1,6 @@
 import request from "request";
 import cheerio from "cheerio";
-import { e } from "../log";
+import { e, l } from "../log";
 
 import { param } from "./old-jquery-serialize";
 import { jitterWait } from "../time-utils";
@@ -287,7 +287,10 @@ export default class Requestor {
     for (let i = 0; i < count; i++) {
       let { plan, params } = forms[i];
       let map = Requestor.generatePlanMap(params);
+
+      l(`Plan : ${plan} : ${params.providerId}`, ">");
       let result = await this.getDetail(map);
+      l(`Plan : ${plan} : ${params.providerId}`, "<");
       results[plan] = {
         data: Requestor.processPlanInfo(result),
         meta: Requestor.extractPlanInfoFromMap(map)
@@ -306,7 +309,10 @@ export default class Requestor {
    */
   async getProvider(raw) {
     const detailMap = Requestor.generateDetailMap(raw);
+
+    l("Detail : " + detailMap.providerId, ">");
     const result = await this.getDetail(detailMap);
+    l("Detail : " + detailMap.providerId, "<");
     const { info, name, detailParams } = this.processDetail(result);
     await jitterWait(500, 500);
     const plans = await this.getPlans(detailParams);

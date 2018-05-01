@@ -71,30 +71,35 @@ export default class Crawl {
   }
 
   /**
-   * Catch the first search request that happens on the page and return the
-   * contents
-   * @returns {Function}
+   *
+   * @returns {Promise<*>}
    */
   async catchSearch() {
     const v =
       "https://hcpdirectory.cigna.com/web/public/providers/searchresults";
 
-    const promises = [];
+    const scripts = await new Promise(resolve => {
+      const stop = this._page.onResponse(response => {
+        if (response.url().indexOf(v) !== 0) {
+          return;
+        }
 
-    const stop = this._page.onResponse(response => {
-      if (response.url().indexOf(v) !== 0) {
-        return;
-      }
+        response
+          .text()
+          .then(body => this.processSearchResults(body))
+          .then(s => {
+            // This case means we ignore this caught request;
+            if (s === null) {
+              return;
+            }
 
-      promises.push(
-        response.text().then(body => this.processSearchResults(body))
-      );
+            stop();
+            resolve(s);
+          });
+      });
     });
 
-    return async () => {
-      stop();
-      return Promise.all(promises);
-    };
+    return this.getDetailFromScripts(scripts);
   }
 
   async removeCurrentResults() {
@@ -115,17 +120,22 @@ export default class Crawl {
     }, s);
   }
 
+  /**
+   * Keeps manipulating the page until there are no more results. Returns true
+   * if there ARE more results, false otherwise.
+   * @returns {Promise<number>}
+   */
   async moreResults() {
     if (this._currentPage >= this.totalPages()) {
       l("We appear to be at a greater page than the total.");
-      return false;
+      return 0;
     }
 
     const ended = await this.searchIsEnded();
 
     if (ended) {
       l("searchIsEnded() returned true.");
-      return false;
+      return 0;
     }
 
     const selector = "button.nfinite-scroll-trigger.cigna-button";
@@ -133,8 +143,10 @@ export default class Crawl {
 
     if (!elt) {
       l("The nfinite scroll trigger button isnt on the page.");
-      return false;
+      return 0;
     }
+
+    const catchPromise = this.catchSearch();
 
     // Check to see if its visible
     // noinspection JSUnresolvedVariable
@@ -153,7 +165,11 @@ export default class Crawl {
     }
 
     await jitterWait(1000, 1000);
-    return true;
+    const ret = await catchPromise;
+
+    l("Found " + ret + " more provider details.");
+
+    return ret;
   }
 
   async resetSearch() {
@@ -191,6 +207,11 @@ export default class Crawl {
     );
   }
 
+  /**
+   *
+   * @param rawHTML
+   * @returns {Promise<Array.<Object>|null>}
+   */
   async processSearchResults(rawHTML) {
     let $ = null;
     try {
@@ -208,7 +229,7 @@ export default class Crawl {
 
     // This is to be expected because of dumb webapps
     if ($("div.filter-options").length) {
-      return;
+      return null;
     }
 
     // noinspection JSJQueryEfficiency
@@ -224,7 +245,7 @@ export default class Crawl {
 
     if (length < 1) {
       w(`Zero results found in raw search results.`);
-      return;
+      return [];
     }
 
     const scripts = [];
@@ -242,9 +263,14 @@ export default class Crawl {
       );
     });
 
-    return await this.getDetailFromScripts(scripts);
+    return scripts;
   }
 
+  /**
+   *
+   * @param scripts {Array.<string>}
+   * @returns {Promise<number>}
+   */
   async getDetailFromScripts(scripts) {
     const cookie = await this._page.cookies();
     const ua = this._page.getUserAgent();
@@ -259,6 +285,8 @@ export default class Crawl {
       l(`Detail : ${uid} : ${name}`, result ? "+" : "o");
       await jitterWait(1000, 1000);
     }
+
+    return count;
   }
 
   async updatePaginationData() {
@@ -354,7 +382,7 @@ export default class Crawl {
     do {
       await this.setupNewPage();
 
-      let stopSearch = this.catchSearch();
+      let catchPromise = this.catchSearch();
 
       await this.clickApply();
       await jitterWait(500, 500);
@@ -362,9 +390,10 @@ export default class Crawl {
 
       l(this.describeSearch());
 
-      // Keep paginating until we're done.
-      while (await this.moreResults()) {}
+      let count = await catchPromise;
+      l("Found " + count + "initial provider details.");
 
+      while (await this.moreResults()) {}
       l(`Reached the end of ${this.describeSearch()}`);
 
       await stopSearch();
