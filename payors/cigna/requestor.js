@@ -3,7 +3,7 @@ import cheerio from "cheerio";
 import { e } from "../log";
 
 import { param } from "./old-jquery-serialize";
-import { jitterWait, wait } from "../time-utils";
+import { jitterWait } from "../time-utils";
 
 const ORIGIN = "https://hcpdirectory.cigna.com";
 
@@ -38,6 +38,20 @@ export default class Requestor {
       "User-Agent": this._ua,
       "X-Requested-With": "XMLHttpRequest"
     };
+  }
+
+  /**
+   *
+   * @param $ {Object}
+   * @returns {boolean}
+   */
+  static checkHTMLForRateLimit($) {
+    // noinspection JSValidateTypes
+    const h1 = $("h1");
+    if (!h1.length) {
+      return false;
+    }
+    return h1.eq(0).html() === "Hold up there!";
   }
 
   /**
@@ -175,6 +189,11 @@ export default class Requestor {
       rawHTML.replace(/[\t\n\r]/gm, "").replace(/\s\s+/g, " ")
     );
 
+    if (Requestor.checkHTMLForRateLimit($)) {
+      e("Encountered rate limit in detail request.");
+      process.exit(1);
+    }
+
     // We need to do this for the "new Function() thing later"
     // noinspection JSUnusedGlobalSymbols
     $.uriAnchor = {
@@ -211,15 +230,14 @@ export default class Requestor {
             return null;
           }
 
-          const script = raw.slice(raw.indexOf("getDetails(") + 11, -3);
-
           try {
             const plan = raw.split("function getDetails_")[1].split("(){")[0];
+            const script = raw.slice(raw.indexOf("getDetails(") + 11, -3);
             const params = new Function("$", "return " + script)($);
             return { plan, params };
           } catch (err) {
             e("Failed to evaluate script:");
-            console.log(script);
+            console.log(raw);
             return null;
           }
         })
@@ -234,40 +252,65 @@ export default class Requestor {
       rawHTML.replace(/[\t\n\r]/gm, "").replace(/\s\s+/g, " ")
     );
 
+    if (Requestor.checkHTMLForRateLimit($)) {
+      e("Encountered rate limit in plan request.");
+      process.exit(1);
+    }
+
     // noinspection JSUnresolvedFunction
     return Array.from(
       $("td")
-        .map((i, elem) => {
-          $(elem).html();
-        })
+        .map((i, elem) => $(elem).html())
         .get()
     );
   }
 
+  static extractPlanInfoFromMap(map) {
+    return {
+      productCodes: map.productCodes,
+      medicalProductCode: map.medicalProductCode,
+      medicalNetworkCode: map.medicalNetworkCode,
+      networkCode: map.networkCode,
+      medicalMpoCode: map.medicalMpoCode,
+      medicalNpoCode: map.medicalNpoCode
+    };
+  }
+
   /**
    *
-   * @param paramList {Object}
-   * @returns {Promise<Object>}
+   * @param forms {Object}
+   * @returns {Promise<Object.<string, Object>>}
    */
-  async getPlans(paramList) {
-    const forms = paramList.map(elt => Requestor.generatePlanMap(elt));
+  async getPlans(forms) {
     const count = forms.length;
     const results = {};
     for (let i = 0; i < count; i++) {
       let { plan, params } = forms[i];
-      let result = await this.getDetail(params);
-      results[plan] = Requestor.processPlanInfo(result);
+      let map = Requestor.generatePlanMap(params);
+      let result = await this.getDetail(map);
+      results[plan] = {
+        data: Requestor.processPlanInfo(result),
+        meta: Requestor.extractPlanInfoFromMap(map)
+      };
       await jitterWait(500, 500);
     }
 
     return results;
   }
 
+  /**
+   *
+   * @param raw {Object}
+   * @returns {Promise<{info: string, name: string, plans: Object<string,
+   *   {data: Object, meta: Object}>, uid: number}>}
+   */
   async getProvider(raw) {
-    const result = await this.getDetail(Requestor.generateDetailMap(raw));
+    const detailMap = Requestor.generateDetailMap(raw);
+    const result = await this.getDetail(detailMap);
     const { info, name, detailParams } = this.processDetail(result);
     await jitterWait(500, 500);
-    const planInfo = await this.getPlans(detailParams);
-    await wait(5000000);
+    const plans = await this.getPlans(detailParams);
+
+    return { info, name, plans, uid: detailMap.providerId };
   }
 }

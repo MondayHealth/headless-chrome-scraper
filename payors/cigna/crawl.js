@@ -163,7 +163,7 @@ export default class Crawl {
 
   saveListing(uid, stripped, name) {
     this._rHSet(PROVIDER_LIST_KEY, uid, stripped).then(result =>
-      l(`${uid} : ${name}`, !!result ? "+" : "o")
+      l(`List : ${uid} : ${name}`, !!result ? "+" : "o")
     );
   }
 
@@ -174,6 +174,11 @@ export default class Crawl {
     } catch (e) {
       e(`Failed to parse search results`);
       console.log(e);
+      process.exit(1);
+    }
+
+    if (Requestor.checkHTMLForRateLimit($)) {
+      e(`Caught rate limit on search result request. Exiting.`);
       process.exit(1);
     }
 
@@ -213,7 +218,7 @@ export default class Crawl {
       );
     });
 
-    return this.getDetailFromScripts(scripts);
+    return await this.getDetailFromScripts(scripts);
   }
 
   async getDetailFromScripts(scripts) {
@@ -223,14 +228,13 @@ export default class Crawl {
     const req = new Requestor(href, cookie, ua);
     const count = scripts.length;
 
-    const promises = [];
-
     for (let i = 0; i < count; i++) {
-      promises.push(req.getProvider(scripts[i]));
-      await jitterWait(250, 250);
+      let { info, name, plans, uid } = await req.getProvider(scripts[i]);
+      let output = JSON.stringify({ info, name, plans });
+      let result = this._rHSet(PROVIDER_DETAIL_KEY, uid, output);
+      l(`Detail : ${uid} : ${name}`, result ? "+" : "o");
+      await jitterWait(1000, 1000);
     }
-
-    return Promise.all(promises);
   }
 
   async updatePaginationData() {
