@@ -104,12 +104,36 @@ export default class Crawl {
     );
   }
 
+  async searchIsEnded() {
+    const s = ".nfinite-scroll-trigger.cigna-button.cigna-button-purple-light";
+    return this._page.do(sel => {
+      const elt = document.querySelector(sel);
+      if (!elt) {
+        return false;
+      }
+      return elt.nextSibling ? !!elt.nextSibling.nextSibling : false;
+    }, s);
+  }
+
   async moreResults() {
+    if (this._currentPage >= this.totalPages()) {
+      l("We appear to be at a greater page than the total.");
+      return false;
+    }
+
+    const ended = await this.searchIsEnded();
+
+    if (ended) {
+      l("searchIsEnded() returned true.");
+      return false;
+    }
+
     const selector = "button.nfinite-scroll-trigger.cigna-button";
     const elt = await this._page.$(selector);
 
     if (!elt) {
-      return null;
+      l("The nfinite scroll trigger button isnt on the page.");
+      return false;
     }
 
     // Check to see if its visible
@@ -125,11 +149,11 @@ export default class Crawl {
       );
     } else {
       await this.removeCurrentResults();
-
       await elt.click();
     }
 
-    return jitterWait(1000, 1000);
+    await jitterWait(1000, 1000);
+    return true;
   }
 
   async resetSearch() {
@@ -326,21 +350,6 @@ export default class Crawl {
     } / ${this.totalPages()} pages)`;
   }
 
-  async searchIsEnded() {
-    const s = ".nfinite-scroll-trigger.cigna-button.cigna-button-purple-light";
-    const ret = this._page.do(sel => {
-      const elt = document.querySelector(sel);
-      if (!elt) {
-        return false;
-      }
-      return elt.nextSibling ? !!elt.nextSibling.nextSibling : false;
-    }, s);
-
-    if (ret) {
-      l(`Reached the end of ${this.describeSearch()}`);
-    }
-  }
-
   async crawl() {
     do {
       await this.setupNewPage();
@@ -353,12 +362,10 @@ export default class Crawl {
 
       l(this.describeSearch());
 
-      while (
-        this._currentPage < this.totalPages() &&
-        !(await this.searchIsEnded())
-      ) {
-        await this.moreResults();
-      }
+      // Keep paginating until we're done.
+      while (await this.moreResults()) {}
+
+      l(`Reached the end of ${this.describeSearch()}`);
 
       await stopSearch();
 
