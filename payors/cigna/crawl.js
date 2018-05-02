@@ -307,15 +307,15 @@ export default class Crawl {
     );
 
     return rawHTML.map(raw => {
-      let $ = cheerio.load(raw);
-      let a = $("a[name]").eq(0);
-      let uid = a.attr("name");
-      let name = a.text();
-      let stripped = stripWhitespace(raw);
+      const $ = cheerio.load(raw);
+      const a = $("a[name]").eq(0);
+      const uid = a.attr("name");
+      const name = a.text();
+      const stripped = stripWhitespace(raw);
       this.saveListing(uid, stripped, name);
 
       // Check this shit out
-      let script = "return " + a.attr("onclick").slice(22, -15);
+      const script = "return " + a.attr("onclick").slice(22, -15);
       return new Function(script)();
     });
   }
