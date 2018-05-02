@@ -2,6 +2,14 @@ import devices from "puppeteer/DeviceDescriptors";
 
 let userAgent = null;
 
+/**
+ * Remove tabs, newlines, and carriage returns
+ * @param input {string}
+ * @returns {string}
+ */
+export const stripWhitespace = input =>
+  input.replace(/[\t\n\r]/gm, "").replace(/\s\s+/g, " ");
+
 async function getCachedUserAgent(browser) {
   if (!userAgent) {
     userAgent = await browser.userAgent();
@@ -49,6 +57,21 @@ export default class Page {
   onResponse(callback) {
     this._page.on("response", callback);
     return () => this._page.removeListener("response", callback);
+  }
+
+  /**
+   * Returns innerhtml stripped of newlines and tabs
+   * @param selector {string}
+   * @returns {Promise<string|null>}
+   */
+  async getInnerHTMLFromSelector(selector) {
+    await this._page.waitForSelector(selector);
+    const element = await this._page.$(selector);
+    if (!element) {
+      return null;
+    }
+    const raw = await this._page.do(elt => elt.innerHTML, element);
+    return stripWhitespace(raw);
   }
 
   onRequestFailed(callback) {
