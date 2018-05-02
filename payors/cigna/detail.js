@@ -1,5 +1,5 @@
 import { jitterWait } from "../time-utils";
-import { l } from "../log";
+import { e, l } from "../log";
 import Crawl from "./crawl";
 import cheerio from "cheerio";
 import { stripWhitespace } from "../../page";
@@ -175,6 +175,7 @@ export class DetailScraper {
    * @returns {Promise<void>}
    */
   async getDetails(detailParams, hset) {
+    const listEntrySelector = "tr[data-search-result-id]";
     const linkSelector = listEntrySelector + " div.address-header a[name]";
     await this._page.waitForSelector(linkSelector, 7000);
     const nameLinks = await this._page.$$(linkSelector);

@@ -23,7 +23,7 @@ const document = {
     return { s, innerHTML: "foo" };
   },
   querySelectorAll: noop,
-  body: { clientHeight: 0 }
+  body: { clientHeight: 0, offsetParent: 0 }
 };
 
 const window = { scrollTo: noop };
@@ -77,14 +77,17 @@ export default class Crawl {
   }
 
   async searchIsEnded() {
-    const s = ".nfinite-scroll-trigger.cigna-button.cigna-button-purple-light";
-    return this._page.do(sel => {
-      const elt = document.querySelector(sel);
-      if (!elt) {
-        return false;
-      }
-      return elt.nextSibling ? !!elt.nextSibling.nextSibling : false;
-    }, s);
+    const selector =
+      "#DoctorsContainer > div.resultsList > div.nfinite-scroll-container" +
+      ".nfinite-last-result > nav > p > span";
+
+    const elt = await this._page.$(selector);
+
+    if (!elt) {
+      return false;
+    }
+
+    return (await this._page.do(e => e.innerHTML, elt)) === "End of results";
   }
 
   /**
@@ -116,8 +119,10 @@ export default class Crawl {
       return false;
     }
 
+    // Pause here to avoid a ban
+    await jitterWait(750, 500);
+
     // Check to see if its visible
-    // noinspection JSUnresolvedVariable
     const visible = await this._page.do(
       sel => !!document.querySelector(sel).offsetParent,
       selector
@@ -172,6 +177,8 @@ export default class Crawl {
   }
 
   async setupNewPage() {
+    await this.storeSearchState();
+
     const search = SEARCHES[this._currentSearchIndex];
     l(`Beginning new search: ${search}`);
 
@@ -207,13 +214,12 @@ export default class Crawl {
     const termInputSelector = "input#searchTermOneBox";
     await page.click(termInputSelector);
     await jitterWait(250, 250);
-    await page.type(termInputSelector, search, 27);
-
-    // Click the first entry in the list
-    const topMenuItemSelector = "#ui-id-3 > li.ui-menu-item";
-    await page.waitForSelector(topMenuItemSelector);
-    await wait(500);
-    await page.clickAndWaitForNav(topMenuItemSelector);
+    const elt = await page.$(termInputSelector);
+    await elt.type(search, { delay: 27 });
+    await jitterWait(1000, 250);
+    await elt.press("ArrowDown");
+    await jitterWait(450, 150);
+    await elt.press("Enter");
 
     // Wait for the "continue with my search" dialog
     await jitterWait(500, 500);
@@ -320,6 +326,7 @@ export default class Crawl {
    */
   async processCurrentResults() {
     const listEntrySelector = "tr[data-search-result-id]";
+
     l(`Processing search results.`);
     await this._page.waitForSelector(listEntrySelector, 7000);
     const entries = await this._page.$$(listEntrySelector);
@@ -344,18 +351,21 @@ export default class Crawl {
 
     do {
       await this.setupNewPage();
+
       l(this.describeSearch());
 
       while (await this.moreResults()) {}
       l(`Reached the end of ${this.describeSearch()}`);
 
-      await this.storeSearchState();
     } while (++this._currentSearchIndex < SEARCHES.length);
 
     l("Search appears to be completed.");
 
     await this._page.close();
     this._page = null;
+
+    this._currentSearchIndex = 0;
+    await this.storeSearchState();
 
     l("Waiting 5 seconds to make sure there's no more search saving.");
     return wait(5000);
