@@ -30,6 +30,8 @@ const PROVIDER_LIST_KEY = "cigna:provider-listing";
 
 const PROVIDER_DETAIL_KEY = "cigna:provider-detail";
 
+const SEARCH_STATE_KEY = "cigna:last-search";
+
 export default class Crawl {
   constructor(browser, redis) {
     this._browser = browser;
@@ -45,6 +47,10 @@ export default class Crawl {
     this._rHSet = promisify(redis.hset).bind(redis);
     // noinspection JSUnresolvedVariable
     this._rHGet = promisify(redis.hget).bind(redis);
+    // noinspection JSUnresolvedVariable
+    this._rSet = promisify(redis.set).bind(redis);
+    // noinspection JSUnresolvedVariable
+    this._rGet = promisify(redis.get).bind(redis);
   }
 
   async checkPageForRateLimit() {
@@ -310,7 +316,9 @@ export default class Crawl {
 
     // Do the new page boilerplate
     if (this._page) {
+      l("Making a new page.");
       this._page.close();
+      await jitterWait(1000, 1000);
       this._page = null;
     }
     const page = await Page.newPageFromBrowser(this._browser);
@@ -347,7 +355,7 @@ export default class Crawl {
     await page.clickAndWaitForNav(topMenuItemSelector);
 
     // Wait for the "continue with my search" dialog
-    await jitterWait(1000, 1000);
+    await jitterWait(500, 500);
     const cwmsSelector = "#cbm-dialog-1 > div > div.margin-top-md > button";
     await page.waitForSelector(cwmsSelector);
     await page.click(cwmsSelector);
@@ -370,6 +378,10 @@ export default class Crawl {
       : 0;
   }
 
+  /**
+   * Human readable search description
+   * @returns {string}
+   */
   describeSearch() {
     return `${
       SEARCHES[this._currentSearchIndex]
@@ -378,11 +390,23 @@ export default class Crawl {
     } / ${this.totalPages()} pages)`;
   }
 
+  async storeSearchState() {
+    return this._rSet(SEARCH_STATE_KEY, this._currentSearchIndex);
+  }
+
+  async loadSearchState() {
+    const ret = await this._rGet(SEARCH_STATE_KEY);
+    this._currentSearchIndex = ret ? parseInt(ret) : 0;
+    l("Loaded search state: " + ret);
+  }
+
   async crawl() {
+    await this.loadSearchState();
+
     do {
       await this.setupNewPage();
 
-      let catchPromise = this.catchSearch();
+      const catchPromise = this.catchSearch();
 
       await this.clickApply();
       await jitterWait(500, 500);
@@ -390,16 +414,16 @@ export default class Crawl {
 
       l(this.describeSearch());
 
-      let count = await catchPromise;
+      const count = await catchPromise;
       l("Found " + count + "initial provider details.");
 
       while (await this.moreResults()) {}
       l(`Reached the end of ${this.describeSearch()}`);
 
-      await stopSearch();
-
       await this.resetSearch();
       l(`Finished ${this.describeSearch()}`);
+
+      await this.storeSearchState();
     } while (++this._currentSearchIndex < SEARCHES.length);
 
     l("Search appears to be completed.");

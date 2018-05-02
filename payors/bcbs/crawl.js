@@ -4,6 +4,7 @@ import { e, l, w } from "../log";
 import { jitterWait } from "../time-utils";
 import request from "request";
 import { BCBSSearch, RETRY } from "./search";
+import { FEDERAL } from "./data";
 
 const PROVIDER_KEY = "bcbs:providers";
 
@@ -50,7 +51,9 @@ export default class Crawl {
    */
   static queryStringForObject(obj) {
     return Object.entries(obj)
-      .map(([key, value]) => key + "=" + value)
+      .map(
+        ([key, value]) => (value !== undefined ? key + "=" + value : undefined)
+      )
       .join("&");
   }
 
@@ -105,6 +108,8 @@ export default class Crawl {
 
     const headers = this.getDetailRequestHeaders();
 
+    const pcode = this._search.currentProductCode();
+
     const queryParams = Crawl.queryStringForObject({
       providerId: providerID,
       locationId: locationID,
@@ -112,7 +117,7 @@ export default class Crawl {
       query: "",
       selectedServiceName: "",
       alphaPrefix: "",
-      productCode: this._search.currentProductCode(),
+      productCode: pcode === FEDERAL ? undefined : pcode,
       guid: this._loginData.guid,
       languageCode: "EN"
     });

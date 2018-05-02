@@ -11,15 +11,28 @@ const ORIGIN = "https://hcpdirectory.cigna.com";
  * Take a puppeteer page.cookies() object and transform it into a Cookie header
  * @param raw {Array.<Object.<string, string>>}
  */
-function cookieString(raw) {
-  return raw.map(({ name, value }) => name + "=" + value).join("; ");
-}
-
 export default class Requestor {
   constructor(href, cookie, ua) {
-    this._cookie = cookieString(cookie);
+    this._cookie = cookie;
     this._href = href;
     this._ua = ua;
+    this._cookieOverride = {};
+  }
+
+  cookieString() {
+    return this._cookie
+      .map(({ name, value }) => {
+        if (name === "WT_FPC") {
+          // contains a unix timestamp
+          // id=ip add-geocord.somthing?:lv=stamp:ss=some id
+          const tokens = value.split(":");
+          tokens[1] = "lv=" + new Date().getTime();
+          return "WT_FPC=" + tokens.join(":");
+        }
+        const override = this._cookieOverride[name];
+        return name + "=" + (override ? override : value);
+      })
+      .join("; ");
   }
 
   getPOSTHeaders() {
@@ -30,7 +43,7 @@ export default class Requestor {
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
       "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-      Cookie: this._cookie,
+      Cookie: this.cookieString(),
       Host: "hcpdirectory.cigna.com",
       Origin: ORIGIN,
       Pragma: "no-cache",
@@ -140,6 +153,19 @@ export default class Requestor {
 
   /**
    *
+   * @param rawCookie {string}
+   */
+  updateCookieOverride(rawCookie) {
+    if (!rawCookie) {
+      return;
+    }
+
+    const [name, value] = rawCookie.split(";")[0].split("=");
+    this._cookieOverride[name] = value;
+  }
+
+  /**
+   *
    * @param form {Object}
    * @returns {Promise<string>}
    */
@@ -148,9 +174,10 @@ export default class Requestor {
     const url = ORIGIN + form.ajaxURL;
     const headers = this.getPOSTHeaders();
     const body = param(form);
+    const jar = request.jar();
 
     return new Promise((resolve, reject) => {
-      request.post({ url, headers, gzip, body }, (err, resp, body) => {
+      request.post({ url, headers, gzip, body, jar }, (err, resp, body) => {
         if (err) {
           e(err);
           console.log(resp);
@@ -163,16 +190,9 @@ export default class Requestor {
           reject(resp);
           return;
         }
-
-        /**
-         * There's a TS01b9ab41 cookie that comes back that we could store
-         * though I don't think its related to the session.
+        const cookies = jar.getCookies(headers['Host']);
         const newCookie = resp.headers["set-cookie"][0];
-
-        if (newCookie) {
-          self._cookie = newCookie;
-        }
-         */
+        this.updateCookieOverride(newCookie);
 
         resolve(body);
       });
@@ -210,10 +230,13 @@ export default class Requestor {
       }
     };
 
-    const info = $("div.container-fluid")
-      .eq(1)
-      .html()
-      .toString();
+    const infoElement = $("div.container-fluid").eq(1);
+
+    if (!infoElement.html()) {
+      e("Couldn't find info element!");
+    }
+
+    const info = infoElement.html().toString();
 
     const name = $("h1")
       .html()
@@ -295,7 +318,7 @@ export default class Requestor {
         data: Requestor.processPlanInfo(result),
         meta: Requestor.extractPlanInfoFromMap(map)
       };
-      await jitterWait(500, 500);
+      await jitterWait(1000, 500);
     }
 
     return results;
