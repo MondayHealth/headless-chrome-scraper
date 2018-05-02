@@ -1,11 +1,12 @@
 import Page from "../../page";
 import { jitterWait, wait } from "../time-utils";
-import { e, l, w } from "../log";
+import { e, l } from "../log";
 import cheerio from "cheerio";
 import { promisify } from "util";
-import Requestor from "./requestor";
 
 const BASE = "https://hcpdirectory.cigna.com/web/public/providers";
+
+const SCRAPE_DETAILS = false;
 
 const SEARCHES = [
   "Behavioral Health Provider: Mental Health Counselor",
@@ -13,6 +14,14 @@ const SEARCHES = [
   "Behavioral Health Provider: Psychologist",
   "Behavioral Health Provider: Social Work"
 ];
+
+/**
+ * Remove tabs, newlines, and carriage returns
+ * @param input {string}
+ * @returns {string}
+ */
+const stripWhitespace = input =>
+  input.replace(/[\t\n\r]/gm, "").replace(/\s\s+/g, " ");
 
 const noop = () => undefined;
 
@@ -76,45 +85,6 @@ export default class Crawl {
     await this._page.click(searchButton);
   }
 
-  /**
-   *
-   * @returns {Promise<*>}
-   */
-  async catchSearch() {
-    const v =
-      "https://hcpdirectory.cigna.com/web/public/providers/searchresults";
-
-    const scripts = await new Promise(resolve => {
-      const stop = this._page.onResponse(response => {
-        if (response.url().indexOf(v) !== 0) {
-          return;
-        }
-
-        response
-          .text()
-          .then(body => this.processSearchResults(body))
-          .then(s => {
-            // This case means we ignore this caught request;
-            if (s === null) {
-              return;
-            }
-
-            stop();
-            resolve(s);
-          });
-      });
-    });
-
-    return this.getDetailFromScripts(scripts);
-  }
-
-  async removeCurrentResults() {
-    return this._page.do(
-      s => Array.from(document.querySelectorAll(s)).forEach(e => e.remove()),
-      "tr[data-search-result-id]"
-    );
-  }
-
   async searchIsEnded() {
     const s = ".nfinite-scroll-trigger.cigna-button.cigna-button-purple-light";
     return this._page.do(sel => {
@@ -129,19 +99,22 @@ export default class Crawl {
   /**
    * Keeps manipulating the page until there are no more results. Returns true
    * if there ARE more results, false otherwise.
-   * @returns {Promise<number>}
+   * @returns {Promise<boolean>}
    */
   async moreResults() {
+    // Do the first results
+    await this.processCurrentResults();
+
     if (this._currentPage >= this.totalPages()) {
       l("We appear to be at a greater page than the total.");
-      return 0;
+      return false;
     }
 
     const ended = await this.searchIsEnded();
 
     if (ended) {
       l("searchIsEnded() returned true.");
-      return 0;
+      return false;
     }
 
     const selector = "button.nfinite-scroll-trigger.cigna-button";
@@ -149,10 +122,8 @@ export default class Crawl {
 
     if (!elt) {
       l("The nfinite scroll trigger button isnt on the page.");
-      return 0;
+      return false;
     }
-
-    const catchPromise = this.catchSearch();
 
     // Check to see if its visible
     // noinspection JSUnresolvedVariable
@@ -166,16 +137,10 @@ export default class Crawl {
         window.scrollTo(0, document.body.clientHeight - 100)
       );
     } else {
-      await this.removeCurrentResults();
       await elt.click();
     }
 
-    await jitterWait(1000, 1000);
-    const ret = await catchPromise;
-
-    l("Found " + ret + " more provider details.");
-
-    return ret;
+    return true;
   }
 
   async resetSearch() {
@@ -215,90 +180,31 @@ export default class Crawl {
 
   /**
    *
-   * @param rawHTML
-   * @returns {Promise<Array.<Object>|null>}
+   * @param elements {Array}
+   * @returns {Promise<Array.<string>>}
    */
-  async processSearchResults(rawHTML) {
-    let $ = null;
-    try {
-      $ = cheerio.load(rawHTML);
-    } catch (e) {
-      e(`Failed to parse search results`);
-      console.log(e);
-      process.exit(1);
-    }
+  async processListEntries(elements) {
+    const rawHTML = await Promise.all(
+      elements.map(element => this._page.do(elt => elt.innerHTML, element))
+    );
 
-    if (Requestor.checkHTMLForRateLimit($)) {
-      e(`Caught rate limit on search result request. Exiting.`);
-      process.exit(1);
-    }
-
-    // This is to be expected because of dumb webapps
-    if ($("div.filter-options").length) {
-      return null;
-    }
-
-    // noinspection JSJQueryEfficiency
-    let result = $("td");
-
-    let length = result.length;
-
-    if (length < 1) {
-      $ = cheerio.load(`<table>${rawHTML}</table>`);
-      result = $("td");
-      length = result.length;
-    }
-
-    if (length < 1) {
-      w(`Zero results found in raw search results.`);
-      return [];
-    }
-
-    const scripts = [];
-    result.each((i, el) => {
-      const capture = $(el);
-      const a = capture.find("a[name]").eq(0);
-      const uid = a.attr("name");
-      const name = a.text();
-      const stripped = capture.html().replace(/[\t\n\r]/gm, "");
+    return rawHTML.map(raw => {
+      let $ = cheerio.load(raw);
+      let a = $("a[name]").eq(0);
+      let uid = a.attr("name");
+      let name = a.text();
+      let stripped = stripWhitespace(raw);
       this.saveListing(uid, stripped, name);
 
       // Check this shit out
-      scripts.push(
-        new Function("return " + a.attr("onclick").slice(22, -15))()
-      );
+      let script = "return " + a.attr("onclick").slice(22, -15);
+      return new Function(script)();
     });
-
-    return scripts;
-  }
-
-  /**
-   *
-   * @param scripts {Array.<string>}
-   * @returns {Promise<number>}
-   */
-  async getDetailFromScripts(scripts) {
-    const cookie = await this._page.cookies();
-    const ua = this._page.getUserAgent();
-    const href = await this._page.href();
-    const req = new Requestor(href, cookie, ua);
-    const count = scripts.length;
-
-    for (let i = 0; i < count; i++) {
-      let { info, name, plans, uid } = await req.getProvider(scripts[i]);
-      let output = JSON.stringify({ info, name, plans });
-      let result = this._rHSet(PROVIDER_DETAIL_KEY, uid, output);
-      l(`Detail : ${uid} : ${name}`, result ? "+" : "o");
-      await jitterWait(1000, 1000);
-    }
-
-    return count;
   }
 
   async updatePaginationData() {
     const nFiniteSelector = "div.nfinite-scroll-container";
     this._paginationData = await this._page.do(selector => {
-      // noinspection JSUnresolvedVariable
       const v = document.querySelector(selector).attributes;
       const len = v.length;
       const ret = {};
@@ -360,10 +266,11 @@ export default class Crawl {
     await page.waitForSelector(cwmsSelector);
     await page.click(cwmsSelector);
 
-    await jitterWait(500, 500);
+    await jitterWait(500, 250);
+    await this.applyDistance();
 
-    // Set the distance
-    return this.applyDistance();
+    await jitterWait(500, 250);
+    return await this.clickApply();
   }
 
   totalResults() {
@@ -390,14 +297,233 @@ export default class Crawl {
     } / ${this.totalPages()} pages)`;
   }
 
+  /**
+   * Save the current search state
+   * @returns {Promise<number>}
+   */
   async storeSearchState() {
     return this._rSet(SEARCH_STATE_KEY, this._currentSearchIndex);
   }
 
+  /**
+   * Resurrect the last saved search state
+   * @returns {Promise<void>}
+   */
   async loadSearchState() {
     const ret = await this._rGet(SEARCH_STATE_KEY);
     this._currentSearchIndex = ret ? parseInt(ret) : 0;
     l("Loaded search state: " + ret);
+  }
+
+  /**
+   * Returns innerhtml stripped of newlines and tabs
+   * @param selector {string}
+   * @returns {Promise<string|null>}
+   */
+  async getInnerHTMLFromSelector(selector) {
+    await this._page.waitForSelector(selector);
+    const element = await this._page.$(selector);
+    if (!element) {
+      return null;
+    }
+    const raw = await this._page.do(elt => elt.innerHTML, element);
+    return stripWhitespace(raw);
+  }
+
+  async blockGoogleMapsRequests() {
+    await this._page.setInterceptRequests(true);
+    const stop = this._page.listenForRequests(request => {
+      const target = request.url();
+      if (target.indexOf("googleapis") >= 0) {
+        request.abort();
+      } else {
+        request.continue();
+      }
+    });
+
+    return async () => {
+      stop();
+      return this._page.setInterceptRequests(false);
+    };
+  }
+
+  /**
+   *
+   * @param expectedCount {number}
+   * @returns {Promise<Array.<string>>}
+   */
+  async capturePlanDetailRequests(expectedCount) {
+    let count = 0;
+    let collected = {};
+    const url =
+      "https://hcpdirectory.cigna.com/web/public/providers/searchresults";
+    const self = this;
+    return new Promise(resolve => {
+      const stop = this._page.onResponse(response => {
+        if (response.url().indexOf(url) !== 0) {
+          return;
+        }
+
+        response.text().then(body => {
+          const { planName, value } = self.processPlanDetailResponse(
+            response.request().postData(),
+            body
+          );
+
+          l(`Collected ${count++} / ${expectedCount}`);
+          collected[planName] = value;
+
+          if (count === expectedCount) {
+            stop();
+            resolve(collected);
+          }
+        });
+      });
+    });
+  }
+
+  /**
+   * We save this information so we can tell what plan specifically was
+   * asked for without having to parse weird hashes
+   * @param map {Object}
+   * @returns {{productCodes: *, medicalProductCode: *, medicalNetworkCode: *,
+   *   networkCode: *, medicalMpoCode: *, medicalNpoCode: *}}
+   */
+  static extractPlanInfoFromMap(map) {
+    return {
+      productCodes: map.productCodes,
+      medicalProductCode: map.medicalProductCode,
+      medicalNetworkCode: map.medicalNetworkCode,
+      networkCode: map.networkCode,
+      medicalMpoCode: map.medicalMpoCode,
+      medicalNpoCode: map.medicalNpoCode
+    };
+  }
+
+  /**
+   *
+   * @param $ {Object}
+   * @returns {boolean}
+   */
+  static checkHTMLForRateLimit($) {
+    // noinspection JSValidateTypes
+    const h1 = $("h1");
+    if (!h1.length) {
+      return false;
+    }
+    return h1.eq(0).html() === "Hold up there!";
+  }
+
+  /**
+   *
+   * @param postData {string}
+   * @param body {string}
+   */
+  processPlanDetailResponse(postData, body) {
+    const $ = cheerio.load(stripWhitespace(body));
+
+    if (Crawl.checkHTMLForRateLimit($)) {
+      e("Encountered rate limit in plan request.");
+      process.exit(1);
+    }
+
+    // noinspection JSUnresolvedFunction
+    const data = Array.from(
+      $("td")
+        .map((i, elem) => $(elem).html())
+        .get()
+    );
+
+    const map = {};
+    postData.split("&").forEach(pair => {
+      const [key, value] = pair.split("=");
+      map[key] = value;
+    });
+    const meta = Crawl.extractPlanInfoFromMap(map);
+
+    const value = { meta, data };
+    const planName = `${meta.medicalProductCode}:${meta.medicalMpoCode}:${
+      meta.medicalNpoCode
+    }`;
+    return { planName, value };
+  }
+
+  async clickDetail(elem) {
+    await elem.click();
+
+    const infoSelector = "div#providerDetailsContainer > .container-fluid";
+    const info = await this.getInnerHTMLFromSelector(infoSelector);
+
+    if (!info) {
+      e("Couldn't find info element!");
+      process.exit(1);
+    }
+
+    const nameSelector = "#providerDetailsContainer h1";
+    const name = await this.getInnerHTMLFromSelector(nameSelector);
+
+    if (!name) {
+      e("Couldn't find name element!");
+      process.exit(1);
+    }
+
+    const planLinkSelector = "div#providerDetailsContainer > section > a";
+    const planLinks = await this._page.$$(planLinkSelector);
+
+    const count = planLinks.length;
+    console.assert(count);
+
+    const stopBlockingMaps = await this.blockGoogleMapsRequests();
+    const planDetailRequests = this.capturePlanDetailRequests(count);
+
+    // click all the plan links
+    l(`Clicking ${count} plan links`);
+    for (let i = 0; i < count; i++) {
+      planLinks[i].click();
+      await jitterWait(500, 500);
+    }
+
+    const plans = await planDetailRequests;
+    l(`Collected ${count} plan info blocks`);
+
+    await stopBlockingMaps();
+
+    await this._page.click("#backToResults");
+
+    return { info, name, plans };
+  }
+
+  /**
+   * Process all results on the page right now then remove them
+   * @returns {Promise<void>}
+   */
+  async processCurrentResults() {
+    const listEntrySelector = "tr[data-search-result-id]";
+    const linkSelector = listEntrySelector + " div.address-header a[name]";
+    await this._page.waitForSelector(linkSelector, 7000);
+    await this.updatePaginationData();
+    const nameLinks = await this._page.$$(linkSelector);
+
+    l(`Processing search results.`);
+    const entries = await this._page.$$(listEntrySelector);
+    const detailParams = await this.processListEntries(entries);
+
+    if (SCRAPE_DETAILS) {
+      l("Scraping details for search results.");
+      for (let i = 0; i < nameLinks.length; i++) {
+        let uid = detailParams[i].providerId;
+        let output = JSON.stringify(await this.clickDetail(nameLinks[i]));
+        let result = this._rHSet(PROVIDER_DETAIL_KEY, uid, output);
+        l(`Detail : ${uid} : ${name}`, result ? "+" : "o");
+      }
+    }
+
+    // Remove existing results we just scanned from the page
+    l("Removing scraped list entries.");
+    return this._page.do(
+      s => Array.from(document.querySelectorAll(s)).forEach(e => e.remove()),
+      "tr[data-search-result-id]"
+    );
   }
 
   async crawl() {
@@ -405,17 +531,7 @@ export default class Crawl {
 
     do {
       await this.setupNewPage();
-
-      const catchPromise = this.catchSearch();
-
-      await this.clickApply();
-      await jitterWait(500, 500);
-      await this.updatePaginationData();
-
       l(this.describeSearch());
-
-      const count = await catchPromise;
-      l("Found " + count + "initial provider details.");
 
       while (await this.moreResults()) {}
       l(`Reached the end of ${this.describeSearch()}`);

@@ -56,8 +56,8 @@ export default class Page {
     return () => this._page.removeListener("requestfailed", callback);
   }
 
-  async interceptRequests() {
-    return this._page.setRequestInterception(true);
+  async setInterceptRequests(newValue) {
+    return this._page.setRequestInterception(newValue);
   }
 
   async $(selector) {
