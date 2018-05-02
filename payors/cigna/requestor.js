@@ -153,15 +153,18 @@ export default class Requestor {
 
   /**
    *
-   * @param rawCookie {string}
+   * @param cookies {Array.<string>|null|undefined}
    */
-  updateCookieOverride(rawCookie) {
-    if (!rawCookie) {
+  updateCookieOverrides(cookies) {
+    if (!cookies || !cookies.length) {
+      e("Seems like there's no cookie.");
       return;
     }
 
-    const [name, value] = rawCookie.split(";")[0].split("=");
-    this._cookieOverride[name] = value;
+    cookies.forEach(cookie => {
+      const [name, value] = cookie.split(";")[0].split("=");
+      this._cookieOverride[name] = value;
+    });
   }
 
   /**
@@ -174,10 +177,9 @@ export default class Requestor {
     const url = ORIGIN + form.ajaxURL;
     const headers = this.getPOSTHeaders();
     const body = param(form);
-    const jar = request.jar();
 
     return new Promise((resolve, reject) => {
-      request.post({ url, headers, gzip, body, jar }, (err, resp, body) => {
+      request.post({ url, headers, gzip, body }, (err, resp, body) => {
         if (err) {
           e(err);
           console.log(resp);
@@ -190,9 +192,9 @@ export default class Requestor {
           reject(resp);
           return;
         }
-        const cookies = jar.getCookies(headers['Host']);
-        const newCookie = resp.headers["set-cookie"][0];
-        this.updateCookieOverride(newCookie);
+
+        const newCookies = resp.headers["set-cookie"];
+        this.updateCookieOverrides(newCookies);
 
         resolve(body);
       });
@@ -288,6 +290,13 @@ export default class Requestor {
     );
   }
 
+  /**
+   * We save this information so we can tell what plan specifically was
+   * asked for without having to parse weird hashes
+   * @param map {Object}
+   * @returns {{productCodes: *, medicalProductCode: *, medicalNetworkCode: *,
+   *   networkCode: *, medicalMpoCode: *, medicalNpoCode: *}}
+   */
   static extractPlanInfoFromMap(map) {
     return {
       productCodes: map.productCodes,
@@ -307,19 +316,19 @@ export default class Requestor {
   async getPlans(forms) {
     const count = forms.length;
     const results = {};
+
+    l(`Getting details for ${count} plans.`, ">");
     for (let i = 0; i < count; i++) {
       let { plan, params } = forms[i];
       let map = Requestor.generatePlanMap(params);
-
-      l(`Plan : ${plan} : ${params.providerId}`, ">");
       let result = await this.getDetail(map);
-      l(`Plan : ${plan} : ${params.providerId}`, "<");
       results[plan] = {
         data: Requestor.processPlanInfo(result),
         meta: Requestor.extractPlanInfoFromMap(map)
       };
-      await jitterWait(1000, 500);
+      await jitterWait(750, 500);
     }
+    l(`Got details for ${count} plans.`, ">");
 
     return results;
   }
@@ -332,14 +341,13 @@ export default class Requestor {
    */
   async getProvider(raw) {
     const detailMap = Requestor.generateDetailMap(raw);
-
     l("Detail : " + detailMap.providerId, ">");
     const result = await this.getDetail(detailMap);
-    l("Detail : " + detailMap.providerId, "<");
     const { info, name, detailParams } = this.processDetail(result);
+    l(`Detail : ${detailMap.providerId} : ${name}`, "<");
     await jitterWait(500, 500);
     const plans = await this.getPlans(detailParams);
-
+    await jitterWait(1000, 500);
     return { info, name, plans, uid: detailMap.providerId };
   }
 }
