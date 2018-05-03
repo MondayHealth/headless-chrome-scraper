@@ -58,6 +58,13 @@ export default class Crawl {
     this._rGet = promisify(redis.get).bind(redis);
     // noinspection JSUnresolvedVariable
     this._rHExists = promisify(redis.hexists).bind(redis);
+
+    const sigHandle = () => {
+      console.log("Caught SIGTERM! Stopping...");
+      process.exit(1);
+    };
+
+    process.on("SIGINT", sigHandle);
   }
 
   /**
@@ -140,23 +147,23 @@ export default class Crawl {
 
     await this._page.waitForSelector(behavioralHealthSwitchSelector);
 
-    await jitterWait(100, 100);
+    await jitterWait(50, 50);
     await this._page.click(behavioralHealthSwitchSelector);
-    await jitterWait(100, 100);
+    await jitterWait(50, 50);
     await this._page.click(fiveMileSelector);
-    await jitterWait(100, 100);
+    await jitterWait(50, 50);
     await this._page.click(optionSelector);
-    await jitterWait(100, 100);
+    await jitterWait(50, 50);
     const rightArrowSelector = "#individualOrClinic3 #moveright";
-    await jitterWait(100, 100);
+    await jitterWait(50, 50);
     await this._page.click(rightArrowSelector);
-    await jitterWait(100, 100);
+    await jitterWait(50, 50);
 
     const zipCodeSelector = 'input[name="zipCode"]';
     const zip = await this._page.$(zipCodeSelector);
     await zip.type(String(this.currentZipCode()), { delay: 30 });
 
-    await jitterWait(100, 100);
+    await jitterWait(50, 50);
 
     // Do a one mile search
     await this.injectSearchModifier(1);
@@ -218,6 +225,8 @@ export default class Crawl {
       this._page = null;
     }
 
+    await this.storeSearchState();
+
     this._page = await Page.newPageFromBrowser(this._browser);
     this._ua = this._page.getUserAgent();
     await this._page.goThenWait(BASE, true);
@@ -256,10 +265,11 @@ export default class Crawl {
     for (let i = 0; i < newProviders.length; i++) {
       let pid = newProviders[i];
       let detail = await getDetail(cookies, this._ua, pid);
-      let added = await this._rHSet(DETAIL_KEY, pid, JSON.stringify(detail));
       // noinspection JSUnresolvedVariable
-      l(detail.providerDemographicInfo.profileTitle, !!added ? "+" : "o");
-      await jitterWait(200, 50);
+      let title = detail.providerDemographicInfo.profileTitle;
+      let added = await this._rHSet(DETAIL_KEY, pid, JSON.stringify(detail));
+      l(title, !!added ? "+" : "o");
+      await jitterWait(100, 50);
     }
 
     this._currentSpecialty++;
