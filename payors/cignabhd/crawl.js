@@ -3,10 +3,15 @@ import { jitterWait, wait } from "../time-utils";
 import { ZIP_CODES } from "../emblem/ny_zip_codes";
 import { promisify } from "util";
 import { e, l } from "../log";
+import { getDetail } from "./detail";
+
+const SEARCH_URL = "https://apps.cignabehavioral.com/web/retrieveProviders.do";
 
 const BASE = "https://apps.cignabehavioral.com/web/consumer.do#/findAtherapist";
 
 const SEARCH_KEY = "cignabhd:last-search";
+
+const DETAIL_KEY = "cignabhd:provider-detail";
 
 const PROVIDER_LIST = "cignabhd:provider-listing";
 
@@ -51,6 +56,18 @@ export default class Crawl {
     this._rSet = promisify(redis.set).bind(redis);
     // noinspection JSUnresolvedVariable
     this._rGet = promisify(redis.get).bind(redis);
+    // noinspection JSUnresolvedVariable
+    this._rHExists = promisify(redis.hexists).bind(redis);
+  }
+
+  /**
+   *
+   * @param newData {[{id: string, name: string}]}
+   */
+  setSpecialtyData(newData) {
+    // It's unclear why this inspection triggers here.
+    // noinspection JSUnusedGlobalSymbols
+    this._specialtyData = newData;
   }
 
   async updateSpecialtyData() {
@@ -65,7 +82,7 @@ export default class Crawl {
       process.exit(1);
     }
 
-    this._specialtyData = result;
+    this.setSpecialtyData(result);
   }
 
   /**
@@ -73,10 +90,9 @@ export default class Crawl {
    * @returns {Promise<Array.<Object>>}
    */
   async catchSearch() {
-    const url = "https://apps.cignabehavioral.com/web/retrieveProviders.do";
     return new Promise((resolve, reject) => {
       const stop = this._page.onResponse(response => {
-        if (response.url().indexOf(url) !== 0) {
+        if (response.url().indexOf(SEARCH_URL) !== 0) {
           return;
         }
 
@@ -85,6 +101,9 @@ export default class Crawl {
           stop();
           return;
         }
+
+        const dist = JSON.parse(response.request().postData()).distance;
+        l("Search distance: " + dist);
 
         response.text().then(body => {
           stop();
@@ -139,9 +158,30 @@ export default class Crawl {
 
     await jitterWait(100, 100);
 
+    // Do a one mile search
+    await this.injectSearchModifier(1);
+
     const searchResult = this.catchSearch();
     await this._page.clickAndWaitForNav('input[type="submit"]');
     return searchResult;
+  }
+
+  /**
+   * Modify the angular SPA to change all distance requests to the passed amount
+   * @param newDistance {number}
+   * @returns {Promise<void>}
+   */
+  async injectSearchModifier(newDistance) {
+    await this._page.do(d => {
+      const SCOPE = angular
+        .element(document.querySelector("[ng-controller]"))
+        .scope();
+      const OLD = SCOPE.submitForm;
+      SCOPE.submitForm = formData => {
+        formData.distance = String(d);
+        return OLD.call(SCOPE, formData);
+      };
+    }, newDistance);
   }
 
   currentSpecialtyName() {
@@ -179,6 +219,7 @@ export default class Crawl {
     }
 
     this._page = await Page.newPageFromBrowser(this._browser);
+    this._ua = this._page.getUserAgent();
     await this._page.goThenWait(BASE, true);
 
     // I don't like this sort of thing but it needs to eval the JS first
@@ -196,9 +237,10 @@ export default class Crawl {
         const json = JSON.stringify(payload);
         const uid = [pid, lid].join(":");
         const newProvider = !!(await this._rHSet(PROVIDER_LIST, uid, json));
-        if (newProvider) {
+        if (!(await this._rHExists(DETAIL_KEY, pid))) {
           newProviders.push(pid);
         }
+        // noinspection JSUnresolvedVariable
         l(
           `${payload.firstName} ${payload.lastName}, ${
             payload.licenseCode
@@ -208,7 +250,17 @@ export default class Crawl {
       })
     );
 
-    l("This is where I would scan " + newProviders.length + " new providers.");
+    l("Scanning for " + newProviders.length + " providers with no detail.");
+
+    const cookies = await this._page.cookies();
+    for (let i = 0; i < newProviders.length; i++) {
+      let pid = newProviders[i];
+      let detail = await getDetail(cookies, this._ua, pid);
+      let added = await this._rHSet(DETAIL_KEY, pid, JSON.stringify(detail));
+      // noinspection JSUnresolvedVariable
+      l(detail.providerDemographicInfo.profileTitle, !!added ? "+" : "o");
+      await jitterWait(200, 50);
+    }
 
     this._currentSpecialty++;
 
@@ -217,7 +269,7 @@ export default class Crawl {
       this._currentZipCode++;
     }
 
-    return this._currentZipCode >= ZIP_CODES.length;
+    return this._currentZipCode <= ZIP_CODES.length;
   }
 
   async crawl() {
