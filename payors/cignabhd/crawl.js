@@ -1,0 +1,234 @@
+import Page from "../../page";
+import { jitterWait, wait } from "../time-utils";
+import { ZIP_CODES } from "../emblem/ny_zip_codes";
+import { promisify } from "util";
+import { e, l } from "../log";
+
+const BASE = "https://apps.cignabehavioral.com/web/consumer.do#/findAtherapist";
+
+const SEARCH_KEY = "cignabhd:last-search";
+
+const PROVIDER_LIST = "cignabhd:provider-listing";
+
+const noop = () => undefined;
+const document = { querySelector: noop, querySelectorAll: noop };
+const angular = {
+  element: () => {
+    return {
+      scope: () => {
+        return {
+          list_specialtyCategories: { data: null },
+          list_Relationships: { data: null },
+          list_population: { data: null },
+          list_Timings: { data: null }
+        };
+      }
+    };
+  }
+};
+
+export default class Crawl {
+  constructor(browser, redis) {
+    this._browser = browser;
+    this._page = null;
+    this._ua = null;
+
+    this._currentZipCode = null;
+    this._currentSpecialty = null;
+
+    /**
+     *
+     * @type {[{ id: string, name: string }]}
+     * @private
+     */
+    this._specialtyData = [];
+
+    // noinspection JSUnresolvedVariable
+    this._rHSet = promisify(redis.hset).bind(redis);
+    // noinspection JSUnresolvedVariable
+    this._rHGet = promisify(redis.hget).bind(redis);
+    // noinspection JSUnresolvedVariable
+    this._rSet = promisify(redis.set).bind(redis);
+    // noinspection JSUnresolvedVariable
+    this._rGet = promisify(redis.get).bind(redis);
+  }
+
+  async updateSpecialtyData() {
+    const result = await this._page.do(
+      () =>
+        angular.element(document.querySelector("[ng-controller]")).scope()
+          .list_specialtyCategories.data
+    );
+
+    if (!result) {
+      e("Couldn't get specialties.");
+      process.exit(1);
+    }
+
+    this._specialtyData = result;
+  }
+
+  /**
+   *
+   * @returns {Promise<Array.<Object>>}
+   */
+  async catchSearch() {
+    const url = "https://apps.cignabehavioral.com/web/retrieveProviders.do";
+    return new Promise((resolve, reject) => {
+      const stop = this._page.onResponse(response => {
+        if (response.url().indexOf(url) !== 0) {
+          return;
+        }
+
+        if (response.status() !== 200) {
+          reject("Bad status " + response.status());
+          stop();
+          return;
+        }
+
+        response.text().then(body => {
+          stop();
+
+          const result = JSON.parse(body);
+
+          if (result.error !== false) {
+            e("Bad result.");
+            console.log(result);
+            reject(result);
+          } else {
+            // noinspection JSUnresolvedVariable
+            resolve(result.providers);
+          }
+        });
+      });
+    });
+  }
+
+  async doSearch() {
+    const behavioralHealthSwitchSelector =
+      "#ContentsAreaHolder > div.ng-scope > div > div > div:nth-child(1) > " +
+      "div:nth-child(12) > form > div:nth-child(3) > div > table > tbody > " +
+      "tr > td:nth-child(2) > input:nth-child(1)";
+    const fiveMileSelector =
+      "#ContentsAreaHolder > div.ng-scope > div > div > div:nth-child(1) > " +
+      "div:nth-child(12) > form > div:nth-child(7) > div > table > tbody > " +
+      "tr > td:nth-child(2) > input:nth-child(1)";
+    const optionSelector =
+      "#individualOrClinic3 > div > table > tbody > tr > td:nth-child(2) > " +
+      "select:nth-child(1) > option:nth-child(" +
+      (this._currentSpecialty + 1) +
+      ")";
+
+    await this._page.waitForSelector(behavioralHealthSwitchSelector);
+
+    await jitterWait(100, 100);
+    await this._page.click(behavioralHealthSwitchSelector);
+    await jitterWait(100, 100);
+    await this._page.click(fiveMileSelector);
+    await jitterWait(100, 100);
+    await this._page.click(optionSelector);
+    await jitterWait(100, 100);
+    const rightArrowSelector = "#individualOrClinic3 #moveright";
+    await jitterWait(100, 100);
+    await this._page.click(rightArrowSelector);
+    await jitterWait(100, 100);
+
+    const zipCodeSelector = 'input[name="zipCode"]';
+    const zip = await this._page.$(zipCodeSelector);
+    await zip.type(String(this.currentZipCode()), { delay: 30 });
+
+    await jitterWait(100, 100);
+
+    const searchResult = this.catchSearch();
+    await this._page.clickAndWaitForNav('input[type="submit"]');
+    return searchResult;
+  }
+
+  currentSpecialtyName() {
+    return this._specialtyData[this._currentSpecialty]
+      ? this._specialtyData[this._currentSpecialty].name
+      : this._currentSpecialty;
+  }
+
+  describeSearch() {
+    return `${this.currentSpecialtyName()} in ${this.currentZipCode()}`;
+  }
+
+  currentZipCode() {
+    return ZIP_CODES[this._currentZipCode];
+  }
+
+  async loadSearchState() {
+    const raw = await this._rGet(SEARCH_KEY);
+    [this._currentSpecialty, this._currentZipCode] = raw
+      ? JSON.parse(raw)
+      : [0, 0];
+    l(this.describeSearch(), "&");
+  }
+
+  async storeSearchState() {
+    const val = JSON.stringify([this._currentSpecialty, this._currentZipCode]);
+    await this._rSet(SEARCH_KEY, val);
+    l("Stored search state: " + val);
+  }
+
+  async search() {
+    if (this._page) {
+      await this._page.close();
+      this._page = null;
+    }
+
+    this._page = await Page.newPageFromBrowser(this._browser);
+    await this._page.goThenWait(BASE, true);
+
+    // I don't like this sort of thing but it needs to eval the JS first
+    await wait(500);
+    await this.updateSpecialtyData();
+
+    const providers = await this.doSearch();
+
+    const newProviders = [];
+
+    await Promise.all(
+      providers.map(async payload => {
+        const pid = payload.providerId;
+        const lid = payload.locationId;
+        const json = JSON.stringify(payload);
+        const uid = [pid, lid].join(":");
+        const newProvider = !!(await this._rHSet(PROVIDER_LIST, uid, json));
+        if (newProvider) {
+          newProviders.push(pid);
+        }
+        l(
+          `${payload.firstName} ${payload.lastName}, ${
+            payload.licenseCode
+          } (${uid})`,
+          newProvider ? "+" : "o"
+        );
+      })
+    );
+
+    l("This is where I would scan " + newProviders.length + " new providers.");
+
+    this._currentSpecialty++;
+
+    if (this._currentSpecialty >= this._specialtyData.length) {
+      this._currentSpecialty = 0;
+      this._currentZipCode++;
+    }
+
+    return this._currentZipCode >= ZIP_CODES.length;
+  }
+
+  async crawl() {
+    await this.loadSearchState();
+
+    while (await this.search()) {}
+
+    l("Search appears to be complete!");
+
+    this._currentSpecialty = 0;
+    this._currentZipCode = 0;
+    return this.storeSearchState();
+  }
+}
