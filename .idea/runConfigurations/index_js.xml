@@ -1,5 +1,5 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="index.js" type="NodeJSConfigurationType" factoryName="Node.js" application-parameters="network=cignabhd headless=false" nameIsGenerated="true" path-to-js-file="index.js" working-dir="$PROJECT_DIR$">
+  <configuration default="false" name="index.js" type="NodeJSConfigurationType" factoryName="Node.js" application-parameters="network=oscar headless=false" nameIsGenerated="true" path-to-js-file="index.js" working-dir="$PROJECT_DIR$">
     <method />
   </configuration>
 </component>
