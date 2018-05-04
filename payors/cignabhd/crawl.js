@@ -279,7 +279,7 @@ export default class Crawl {
       this._currentZipCode++;
     }
 
-    return this._currentZipCode <= ZIP_CODES.length;
+    return this._currentZipCode < ZIP_CODES.length;
   }
 
   async crawl() {

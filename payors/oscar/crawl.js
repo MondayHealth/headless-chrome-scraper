@@ -211,7 +211,7 @@ export default class Crawl {
       this._providerIndex = 0;
     }
 
-    return this._providerIndex <= PROVIDER_TYPES.length;
+    return this._providerIndex < PROVIDER_TYPES.length;
   }
 
   /**
