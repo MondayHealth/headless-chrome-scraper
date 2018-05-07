@@ -2,6 +2,7 @@ import { gunzip } from "zlib";
 // Apparently this isn't added yet because it's stage 1 experimental
 // noinspection NpmUsedModulesInstalled
 import http2 from "http2";
+import { l, w } from "./log";
 
 export default class Http2Client {
   /**
@@ -12,6 +13,7 @@ export default class Http2Client {
   constructor(url, authority) {
     this._url = url;
     this._authority = authority;
+    this._goAway = false;
     this.regenerateClient();
   }
 
@@ -21,8 +23,11 @@ export default class Http2Client {
       console.error("!! HTTP2 LIBRARY ERROR !!");
       console.error(error);
     });
-    this._client.on("goaway", () => {
-      console.log("!! goaway");
+    this._goAway = false;
+    this._client.on("goaway", (code, lastStream) => {
+      w(["goaway", code, lastStream].join(" "));
+      this._client = null;
+      this._goAway = true;
     });
   }
 
@@ -35,20 +40,52 @@ export default class Http2Client {
       ...headers
     };
 
+    if (!this._client) {
+      this.regenerateClient();
+    }
+
+    let responseHeaders = null;
+    const data = [];
+
     const req = this._client.request(options);
 
-    let encoding = null;
-
-    req.on("response", headers => {
-      encoding = headers["content-encoding"];
-    });
-
-    const data = [];
+    req.on("response", head => (responseHeaders = head));
     req.on("data", chunk => data.push(chunk));
 
+    const self = this;
+
     return new Promise((resolve, reject) => {
+      const retry = () => {
+        l("Retrying ...");
+        return self.req(path, headers, acceptUnencodedResponses)
+          .then(a => resolve(a))
+          .catch(a => reject(a));
+      };
+
+      req.on("close", e => {
+        if (e) {
+          console.log(e);
+        }
+      });
+
+      req.on("error", e => {
+        console.error(e);
+        retry();
+      });
+
       req.on("end", () => {
-        if (!encoding && !acceptUnencodedResponses && encoding !== "gzip") {
+        // Were we interrupted?
+        if (self._goAway) {
+          retry();
+          return;
+        }
+
+        const encoding = responseHeaders["content-encoding"];
+
+        if (
+          (!encoding && !acceptUnencodedResponses) ||
+          (encoding && encoding !== "gzip")
+        ) {
           console.error(
             "Server did not send a gzip encoded response!",
             encoding
@@ -71,6 +108,11 @@ export default class Http2Client {
           }
         });
       });
+
+      if (self._goAway) {
+        retry();
+        return;
+      }
 
       req.end();
     });

@@ -2,7 +2,7 @@ import { promisify } from "util";
 import { e, l } from "../log";
 import vm from "vm";
 import cheerio from "cheerio";
-import { jitterWait } from "../time-utils";
+import { wait } from "../time-utils";
 import Page from "../../page";
 import Http2Client from "../http2-util";
 
@@ -317,7 +317,6 @@ export default class Crawl {
     const headers = this.getHeaders();
 
     const client = new Http2Client(HOST, AUTHORITY);
-    let reqCount = 1;
 
     // Oscar is smart enough not to gzip small text blobs
     l(this.getPath(), ">");
@@ -348,15 +347,6 @@ export default class Crawl {
         l(path, ">");
         let rawResult = await client.req(path, detailHeaders);
 
-        // We have to do this because the servers get pissy if you leave the
-        // connection open for too long.
-        if (reqCount++ > 2) {
-          client.dispose();
-          await jitterWait(500, 500);
-          client.regenerateClient();
-          reqCount = 0;
-        }
-
         let detailResult = Crawl.extractDetailFromPageHTML(rawResult);
 
         if (!detailResult) {
@@ -368,7 +358,7 @@ export default class Crawl {
 
         await Promise.all([
           this.processProviderDetail(detailResult),
-          jitterWait(100, 100)
+          wait(250)
         ]);
       }
     }
