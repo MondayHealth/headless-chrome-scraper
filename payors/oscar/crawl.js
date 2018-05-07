@@ -311,12 +311,17 @@ export default class Crawl {
    * @param client {Http2Client}
    * @returns {Promise<boolean>}
    */
-  async search(client) {
+  async search() {
     await this.storeSearchState();
 
     // Make the request
     const headers = this.getHeaders();
-    const raw = await client.req(this.getPath(), headers);
+
+    const client = new Http2Client(HOST, AUTHORITY);
+    let reqCount = 1;
+
+    // Oscar is smart enough not to gzip small text blobs
+    const raw = await client.req(this.getPath(), headers, true);
 
     /**
      *
@@ -337,7 +342,18 @@ export default class Crawl {
       for (let j = 0; j < noDetails.length; j++) {
         let { id, location } = noDetails[j];
         let path = Crawl.getDetailPath(id, location);
+
+        l(path, ">");
         let rawResult = await client.req(path, detailHeaders);
+
+        reqCount++;
+
+        if (reqCount > 4) {
+          client.dispose();
+          await jitterWait(250, 250);
+          client.regenerateClient();
+        }
+
         let detailResult = Crawl.extractDetailFromPageHTML(rawResult);
 
         if (!detailResult) {
@@ -354,6 +370,8 @@ export default class Crawl {
       }
     }
 
+    client.dispose();
+
     return this.currentPageComplete();
   }
 
@@ -366,10 +384,8 @@ export default class Crawl {
     this._ua = this._page.getUserAgent();
     await this.updateCookieHeader();
 
-    const client = new Http2Client(HOST, AUTHORITY);
-
     l("Beginning search.");
-    while (await this.search(client)) {}
+    while (await this.search()) {}
 
     client.dispose();
 
