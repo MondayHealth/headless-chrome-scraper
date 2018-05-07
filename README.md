@@ -1,0 +1,1 @@
+`npm install` then something like `node index.js network=oscar headless=true`
