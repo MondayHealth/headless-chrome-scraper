@@ -53,6 +53,7 @@ export default class Http2Client {
             "Server did not send a gzip encoded response!",
             encoding
           );
+          console.log(data);
           reject("bad encoding");
           return;
         }

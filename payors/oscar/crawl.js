@@ -320,6 +320,7 @@ export default class Crawl {
     let reqCount = 1;
 
     // Oscar is smart enough not to gzip small text blobs
+    l(this.getPath(), ">");
     const raw = await client.req(this.getPath(), headers, true);
 
     /**
@@ -328,7 +329,9 @@ export default class Crawl {
      *   string, id: string, locations:{id: string}[]}[]}}}
      */
     const result = JSON.parse(raw);
-    this._currentPageTotal = result.results.totalResults;
+    this._currentPageTotal = Math.ceil(
+      result.results.totalResults / PAGINATION
+    );
     const providers = result.results.hits;
 
     // This array now contains all providers about which we have no details
@@ -347,9 +350,9 @@ export default class Crawl {
 
         // We have to do this because the servers get pissy if you leave the
         // connection open for too long.
-        if (reqCount++ > 4) {
+        if (reqCount++ > 2) {
           client.dispose();
-          await jitterWait(250, 250);
+          await jitterWait(500, 500);
           client.regenerateClient();
           reqCount = 0;
         }
@@ -365,7 +368,7 @@ export default class Crawl {
 
         await Promise.all([
           this.processProviderDetail(detailResult),
-          jitterWait(750, 500)
+          jitterWait(100, 100)
         ]);
       }
     }
