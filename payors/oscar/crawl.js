@@ -1,6 +1,9 @@
 import { promisify } from "util";
-import Page from "../../page";
 import { e, l } from "../log";
+import vm from "vm";
+import cheerio from "cheerio";
+import { jitterWait } from "../time-utils";
+import Page from "../../page";
 import Http2Client from "../http2-util";
 
 const AUTHORITY = "www.hioscar.com";
@@ -149,6 +152,10 @@ export default class Crawl {
     l("Reset search state.");
   }
 
+  /**
+   * Describe the current search in a human readable form
+   * @returns {string}
+   */
   describeSearch() {
     const page = this._pageIndex;
 
@@ -247,6 +254,59 @@ export default class Crawl {
   }
 
   /**
+   *
+   * @param detail {{augmented_provider: {provider: {npi: string} } }}
+   * @returns {Promise<void>}
+   */
+  async processProviderDetail(detail) {
+    const npi = detail.augmented_provider.provider.npi;
+
+    if (!npi) {
+      e("Provider detail has no NPI number");
+      console.log(this.describeSearch());
+      console.log(detail);
+      process.exit(1);
+    }
+
+    const payload = JSON.stringify(detail);
+    const added = await this._rHSet(PROVIDER_DETAIL_KEY, npi, payload);
+    l("DETAIL " + npi, !!added ? "+" : "o");
+  }
+
+  /**
+   * Get the GET request path for a provider detail page
+   * @param id {string}
+   * @param location {string}
+   * @returns {string}
+   */
+  static getDetailPath(id, location) {
+    return [HOST, "people", id, location].join("/") + "/";
+  }
+
+  static extractDetailFromPageHTML(rawHTML) {
+    const $ = cheerio.load(rawHTML);
+    const longestScript = $("script")
+      .get()
+      .filter(a => a.attribs.src === undefined && a.parent.name === "head")
+      .map(a => a.firstChild.data)
+      .reduce((a, b) => (a.length > b.length ? a : b));
+
+    // noinspection JSUnusedGlobalSymbols
+    const sandbox = {
+      window: {},
+      osc: {},
+      oscFluxInitialState: { providerProfile: null },
+      document: { getElementsByTagName: () => [{ className: "" }] }
+    };
+
+    const script = new vm.Script(longestScript);
+    const context = vm.createContext(sandbox);
+    script.runInContext(context);
+
+    return sandbox.oscFluxInitialState.providerProfile;
+  }
+
+  /**
    * Do a search iteration
    * @param client {Http2Client}
    * @returns {Promise<boolean>}
@@ -255,7 +315,7 @@ export default class Crawl {
     await this.storeSearchState();
 
     // Make the request
-    const headers = await this.getHeaders();
+    const headers = this.getHeaders();
     const raw = await client.req(this.getPath(), headers);
 
     /**
@@ -270,9 +330,28 @@ export default class Crawl {
     // This array now contains all providers about which we have no details
     const fxn = this.processProvider.bind(this);
     const noDetailSet = await Promise.all(providers.map(fxn));
+    const detailHeaders = this.getDetailHeaders();
     for (let i = 0; i < noDetailSet.length; i++) {
-      let noDetail = noDetailSet[i];
-      console.log(noDetail);
+      // For each element in the array, there's an array of id:location pairs
+      let noDetails = noDetailSet[i];
+      for (let j = 0; j < noDetails.length; j++) {
+        let { id, location } = noDetails[j];
+        let path = Crawl.getDetailPath(id, location);
+        let rawResult = await client.req(path, detailHeaders);
+        let detailResult = Crawl.extractDetailFromPageHTML(rawResult);
+
+        if (!detailResult) {
+          e("Failed to find detail result from request!");
+          console.log(id, location);
+          console.log(rawResult);
+          process.exit(1);
+        }
+
+        await Promise.all([
+          this.processProviderDetail(detailResult),
+          jitterWait(750, 500)
+        ]);
+      }
     }
 
     return this.currentPageComplete();
