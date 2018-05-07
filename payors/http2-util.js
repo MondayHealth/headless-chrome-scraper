@@ -49,7 +49,6 @@ export default class Http2Client {
 
     const req = this._client.request(options);
 
-    req.on("response", head => (responseHeaders = head));
     req.on("data", chunk => data.push(chunk));
 
     const self = this;
@@ -62,7 +61,17 @@ export default class Http2Client {
           .catch(a => reject(a));
       };
 
+      req.on("response", head => {
+        responseHeaders = head;
+        if (self._goAway) {
+          retry();
+        }
+      });
+
       req.on("close", e => {
+        if (self._goAway) {
+          retry();
+        }
         if (e) {
           console.log(e);
         }
