@@ -308,7 +308,6 @@ export default class Crawl {
 
   /**
    * Do a search iteration
-   * @param client {Http2Client}
    * @returns {Promise<boolean>}
    */
   async search() {
@@ -346,12 +345,13 @@ export default class Crawl {
         l(path, ">");
         let rawResult = await client.req(path, detailHeaders);
 
-        reqCount++;
-
-        if (reqCount > 4) {
+        // We have to do this because the servers get pissy if you leave the
+        // connection open for too long.
+        if (reqCount++ > 4) {
           client.dispose();
           await jitterWait(250, 250);
           client.regenerateClient();
+          reqCount = 0;
         }
 
         let detailResult = Crawl.extractDetailFromPageHTML(rawResult);
@@ -386,8 +386,6 @@ export default class Crawl {
 
     l("Beginning search.");
     while (await this.search()) {}
-
-    client.dispose();
 
     l("Search appears to be complete!");
     return this.resetSearchState();
