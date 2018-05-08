@@ -20,7 +20,7 @@ const noop = () => undefined;
 
 const document = {
   querySelector: s => {
-    return { s, innerHTML: "foo" };
+    return { s, innerHTML: "foo", outerHTML: "bar" };
   },
   querySelectorAll: noop,
   body: { clientHeight: 0, offsetParent: 0 }
@@ -356,7 +356,6 @@ export default class Crawl {
 
       while (await this.moreResults()) {}
       l(`Reached the end of ${this.describeSearch()}`);
-
     } while (++this._currentSearchIndex < SEARCHES.length);
 
     l("Search appears to be completed.");

@@ -172,9 +172,9 @@ export default class Page {
     return this.do(() => document.location.href);
   }
 
-  async clickAndWaitForNav(select, delay) {
+  async clickAndWaitForNav(select, delay, zero) {
     const navPromise = this._page.waitForNavigation({
-      waitUntil: "networkidle2"
+      waitUntil: "networkidle" + (zero ? 0 : 2)
     });
 
     const clickPromise = this.click(select, delay);
