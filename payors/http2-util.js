@@ -18,17 +18,18 @@ export default class Http2Client {
   }
 
   regenerateClient() {
+    if (this._client) {
+      this.dispose();
+    }
+
     this._client = http2.connect(this._url);
     this._client.on("error", error => {
       console.error("!! HTTP2 LIBRARY ERROR !!");
       console.error(error);
     });
     this._goAway = false;
-    this._client.on("goaway", (code, lastStream) => {
-      w(["goaway", code, lastStream].join(" "));
-      this._client = null;
-      this._goAway = true;
-    });
+
+    this._client.on("goaway", () => (this._goAway = true));
   }
 
   async req(path, headers, acceptUnencodedResponses) {
@@ -40,54 +41,43 @@ export default class Http2Client {
       ...headers
     };
 
-    if (!this._client) {
+    if (!this._client || this._goAway) {
+      l("Reopening connection.");
       this.regenerateClient();
     }
-
-    let responseHeaders = null;
-    const data = [];
-
-    const req = this._client.request(options);
-
-    req.on("data", chunk => data.push(chunk));
 
     const self = this;
 
     return new Promise((resolve, reject) => {
       const retry = () => {
-        l("Retrying ...");
-        return self.req(path, headers, acceptUnencodedResponses)
+        l("Retrying .");
+        return self
+          .req(path, headers, acceptUnencodedResponses)
           .then(a => resolve(a))
           .catch(a => reject(a));
       };
 
-      req.on("response", head => {
-        responseHeaders = head;
-        if (self._goAway) {
-          retry();
-        }
-      });
+      const goAwayHandler = code => {
+        w("goaway: " + code);
+        self._goAway = true;
+        return retry();
+      };
 
-      req.on("close", e => {
-        if (self._goAway) {
-          retry();
-        }
-        if (e) {
-          console.log(e);
-        }
-      });
+      self._client.on("goaway", goAwayHandler);
 
-      req.on("error", e => {
-        console.error(e);
-        retry();
-      });
+      const req = self._client.request(options);
+      let responseHeaders = null;
+      const data = [];
+      req.on("data", chunk => data.push(chunk));
+      req.on("response", head => (responseHeaders = head));
 
       req.on("end", () => {
         // Were we interrupted?
         if (self._goAway) {
-          retry();
           return;
         }
+
+        self._client.removeListener("goaway", goAwayHandler);
 
         const encoding = responseHeaders["content-encoding"];
 
@@ -100,6 +90,7 @@ export default class Http2Client {
             encoding
           );
           console.log(data);
+          console.log(responseHeaders);
           reject("bad encoding");
           return;
         }
@@ -118,17 +109,14 @@ export default class Http2Client {
         });
       });
 
-      if (self._goAway) {
-        retry();
-        return;
-      }
-
       req.end();
     });
   }
 
   dispose() {
-    this._client.close();
-    this._client = null;
+    if (this._client) {
+      this._client.close();
+      this._client = null;
+    }
   }
 }

@@ -1,5 +1,5 @@
 import { promisify } from "util";
-import { e, l } from "../log";
+import { e, l, w } from "../log";
 import vm from "vm";
 import cheerio from "cheerio";
 import { wait } from "../time-utils";
@@ -13,6 +13,7 @@ const BASE_URL = HOST + "/search/";
 const SEARCH_KEY = "oscar:last-search";
 const PROVIDER_LIST_KEY = "oscar:provider-list";
 const PROVIDER_DETAIL_KEY = "oscar:provider-detail";
+const AMBIGUOUS_PROVIDER_KEY = "oscar:ambiguous-provider";
 
 const SEARCH_ZIP = 10012;
 const PAGINATION = 20;
@@ -218,7 +219,19 @@ export default class Crawl {
       this._providerIndex = 0;
     }
 
-    return this._providerIndex < PROVIDER_TYPES.length;
+    const more = this._planIndex < PLANS.length;
+
+    if (!more) {
+      this._planIndex = 0;
+    }
+
+    return more;
+  }
+
+  async addToAmbiguousProvider(data) {
+    const id = data.name;
+    await this._rHSet(AMBIGUOUS_PROVIDER_KEY, id, JSON.stringify(data));
+    w("Ambiguous provider: " + id);
   }
 
   /**
@@ -229,10 +242,8 @@ export default class Crawl {
    */
   async processProvider(provider) {
     if (!provider.npi) {
-      e("Provider has no NPI number.");
-      console.log(this.describeSearch());
-      console.log(provider);
-      process.exit(1);
+      await this.addToAmbiguousProvider(provider);
+      return [];
     }
 
     const payload = JSON.stringify(provider);
