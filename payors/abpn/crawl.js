@@ -26,7 +26,7 @@ const SPECIALTIES = [
   "Neurology with Special Qualification in Child Neurology",
   "Neurology",
   "Neuropsychiatry",
-  "Psychiatry",
+  // "Psychiatry",
   "Psychosomatic Med/Consultation-Liaison Psychiatry*"
 ];
 
@@ -276,8 +276,10 @@ export default class Crawl {
 
     // Get the results from the search
     const resultsSelector = "#body > tbody";
+    l("Waiting for page render");
     await this._page.waitForSelector(resultsSelector);
     await wait(500);
+    l("Getting results");
     const rawHTML = await this._page.do(
       sel => document.querySelector(sel).outerHTML,
       resultsSelector
