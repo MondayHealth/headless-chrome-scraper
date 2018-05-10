@@ -7,6 +7,8 @@ import { e, l, w } from "../log";
 import { FEDERAL, PLANS, SEARCH_SETTINGS, SEARCHES } from "./data";
 import { jitterWait, wait } from "../time-utils";
 import { promisify } from "util";
+import { NETWORK_NAME } from "./crawl";
+import { searchStateKeyForName } from "../util";
 
 export const RETRY = Symbol("RETRY");
 
@@ -16,7 +18,7 @@ const ADVANCED_SEARCH_SUFFIX =
   "randCode=BCBSANDHF&alphaPrefix=&bcbsaProductId/ad" +
   "vanced-search";
 
-const SEARCH_KEY = "bcbs:last-search";
+const SEARCH_KEY = searchStateKeyForName(NETWORK_NAME);
 
 const DISTL_AJAX_HEADER = "X-Distil-Ajax";
 
@@ -461,8 +463,6 @@ export class BCBSSearch {
     if (!element) {
       return null;
     }
-
-
 
     const promise = this.catchSearch();
     await this._page.click(buttonSelector);

@@ -5,15 +5,22 @@ import cheerio from "cheerio";
 import { wait } from "../time-utils";
 import Page from "../../page";
 import Http2Client from "../http2-util";
+import {
+  ambiguousKeyForName,
+  detailKeyForName,
+  listingKeyForName,
+  searchStateKeyForName
+} from "../util";
 
 const AUTHORITY = "www.hioscar.com";
 const HOST = "https://" + AUTHORITY;
 const BASE_URL = HOST + "/search/";
 
-const SEARCH_KEY = "oscar:last-search";
-const PROVIDER_LIST_KEY = "oscar:provider-list";
-const PROVIDER_DETAIL_KEY = "oscar:provider-detail";
-const AMBIGUOUS_PROVIDER_KEY = "oscar:ambiguous-provider";
+const NETWORK_NAME = "oscar";
+const SEARCH_KEY = searchStateKeyForName(NETWORK_NAME);
+const PROVIDER_LIST_KEY = listingKeyForName(NETWORK_NAME);
+const PROVIDER_DETAIL_KEY = detailKeyForName(NETWORK_NAME);
+const AMBIGUOUS_PROVIDER_KEY = ambiguousKeyForName(NETWORK_NAME);
 
 const SEARCH_ZIP = 10012;
 const PAGINATION = 20;

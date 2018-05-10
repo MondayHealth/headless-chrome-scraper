@@ -3,6 +3,7 @@ import { jitterWait } from "../time-utils";
 import { l } from "../log";
 import { promisify } from "util";
 import Http2Client from "../http2-util";
+import { listingKeyForName, searchStateKeyForName } from "../util";
 
 const HOST = "https://connect.werally.com";
 const AUTHORITY = "connect.werally.com";
@@ -51,11 +52,11 @@ export default class UnitedCrawl {
   }
 
   searchStateKey() {
-    return this.payorName() + ":search-state";
+    return searchStateKeyForName(this.payorName());
   }
 
   providerKey() {
-    return this.payorName() + ":providers";
+    return listingKeyForName(this.payorName());
   }
 
   currentProviderType() {

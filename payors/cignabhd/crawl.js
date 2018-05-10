@@ -4,16 +4,20 @@ import { ZIP_CODES } from "../emblem/ny_zip_codes";
 import { promisify } from "util";
 import { e, l } from "../log";
 import { getDetail } from "./detail";
+import {
+  detailKeyForName,
+  listingKeyForName,
+  searchStateKeyForName
+} from "../util";
 
 const SEARCH_URL = "https://apps.cignabehavioral.com/web/retrieveProviders.do";
 
 const BASE = "https://apps.cignabehavioral.com/web/consumer.do#/findAtherapist";
 
-const SEARCH_KEY = "cignabhd:last-search";
-
-const DETAIL_KEY = "cignabhd:provider-detail";
-
-const PROVIDER_LIST = "cignabhd:provider-listing";
+const NETWORK_NAME = "cignabhd";
+const SEARCH_KEY = searchStateKeyForName(NETWORK_NAME);
+const DETAIL_KEY = detailKeyForName(NETWORK_NAME);
+const PROVIDER_LIST = listingKeyForName(NETWORK_NAME);
 
 const noop = () => undefined;
 const document = { querySelector: noop, querySelectorAll: noop };

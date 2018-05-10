@@ -2,15 +2,16 @@ import Page from "../../page";
 import { l } from "../log";
 import { jitterWait } from "../time-utils";
 import { promisify } from "util";
+import { listingKeyForName, searchStateKeyForName } from "../util";
 
 const BASE =
   "https://www.goodtherapy.org/newsearch/search.html?search[stateid]=1";
 
 const PROVIER_BASE = "https://www.goodtherapy.org/therapists/profile/";
 
-const PROVIDER_KEY = "gt:providers";
-
-const PREVIOUS_SEARCH = "gt:last-page";
+const NETWORK_NAME = "gt";
+const PROVIDER_KEY = listingKeyForName(NETWORK_NAME);
+const PREVIOUS_SEARCH = searchStateKeyForName(NETWORK_NAME);
 
 export class Crawl {
   constructor(browser, redis) {

@@ -2,10 +2,12 @@ import request from "request";
 import { promisify } from "util";
 
 import Page from "../../page/index";
+import { listingKeyForName } from "../util";
 
 const RATE_LIMIT_WARN_THRESHOLD = 50;
 
-export const RESULT_SET_KEY = "aetna:providers";
+export const NETWORK_NAME = "aetna";
+export const RESULT_SET_KEY = listingKeyForName(NETWORK_NAME);
 
 export function queryStringFromParams(paramMap) {
   return Object.entries(paramMap)
@@ -85,7 +87,7 @@ export default class Base {
     const suffix =
       "#/contentPage?page=providerSearchLanding&site_id=dse&language=en";
 
-    const opts = wait ? { waitUntil: 'networkidle2' } : {};
+    const opts = wait ? { waitUntil: "networkidle2" } : {};
     const goPromise = this._page.go(Base.getReferrer() + suffix, opts);
     this._userAgent = this._page.getUserAgent();
     this._clientID = await getClientIDPromise;

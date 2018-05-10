@@ -1,12 +1,15 @@
 import Page from "../../page";
 import { promisify } from "util";
 import { jitterWait } from "../time-utils";
+import { detailKeyForName, searchStateKeyForName } from "../util";
 
 const BASE = "https://www.psychologytoday.com/us/therapists/ny/";
 
-const LAST_PAGE_KEY = "pt:last-page";
+const NETWORK_NAME = "pt";
 
-const PROVIDER_HASH_KEY = "pt:providers";
+const LAST_PAGE_KEY = searchStateKeyForName(NETWORK_NAME);
+
+const PROVIDER_HASH_KEY = detailKeyForName(NETWORK_NAME);
 
 const CURRENT_SEARCH_COUNTY = "pt:county";
 

@@ -4,10 +4,16 @@ import Page, { stripWhitespace } from "../../page";
 import cheerio from "cheerio";
 import request from "request";
 import { jitterWait, wait } from "../time-utils";
+import {
+  detailKeyForName,
+  listingKeyForName,
+  searchStateKeyForName
+} from "../util";
 
-const SEARCH_KEY = "abpn:last-search";
-const PROVIDER_LIST_KEY = "abpn:provider-list";
-const PROVIDER_DETAIL_KEY = "abpn:provider-detail";
+const NETWORK_NAME = "abpn";
+const SEARCH_KEY = searchStateKeyForName(NETWORK_NAME);
+const PROVIDER_LIST_KEY = listingKeyForName(NETWORK_NAME);
+const PROVIDER_DETAIL_KEY = detailKeyForName(NETWORK_NAME);
 
 const BASE_URL = "https://application.abpn.com/verifycert/verifyCert.asp?a=4";
 const DETAIL_URL =

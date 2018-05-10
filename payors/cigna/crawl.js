@@ -4,6 +4,7 @@ import { e, l } from "../log";
 import cheerio from "cheerio";
 import { promisify } from "util";
 import { DetailScraper } from "./detail";
+import { listingKeyForName, searchStateKeyForName } from "../util";
 
 const BASE = "https://hcpdirectory.cigna.com/web/public/providers";
 
@@ -28,9 +29,9 @@ const document = {
 
 const window = { scrollTo: noop };
 
-const PROVIDER_LIST_KEY = "cigna:provider-listing";
-
-const SEARCH_STATE_KEY = "cigna:last-search";
+const NETWORK_NAME = "cigna";
+const PROVIDER_LIST_KEY = listingKeyForName(NETWORK_NAME);
+const SEARCH_STATE_KEY = searchStateKeyForName(NETWORK_NAME);
 
 export default class Crawl {
   constructor(browser, redis) {

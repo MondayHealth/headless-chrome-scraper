@@ -5,6 +5,11 @@ import { jitterWait, wait } from "../time-utils";
 import { ZIP_CODES } from "./ny_zip_codes";
 import { promisify } from "util";
 import { l } from "../log";
+import {
+  listingKeyForName,
+  networkKeyForName,
+  searchStateKeyForName
+} from "../util";
 
 const NETWORKS = [
   "EMBLEM - COMMERCIAL NON HMO 28 COUNTIES ONLY",
@@ -37,11 +42,10 @@ const DISCIPLINE_NAMES = [
   "Other"
 ];
 
-const PROVIDER_SET = "emblem:providers";
-
-const LAST_SEARCH_KEY = "emblem:last-search";
-
-const NETWORK_SET = "emblem:providers-network";
+const NETWORK_NAME = "emblem";
+const PROVIDER_SET = listingKeyForName(NETWORK_NAME);
+const LAST_SEARCH_KEY = searchStateKeyForName(NETWORK_NAME);
+const NETWORK_SET = networkKeyForName(NETWORK_NAME);
 
 export default class Crawl {
   constructor(browser, redis) {

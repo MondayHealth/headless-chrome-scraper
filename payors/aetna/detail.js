@@ -1,14 +1,15 @@
-import Base from "./base";
+import Base, { NETWORK_NAME } from "./base";
 import Page from "../../page";
 import sessionState from "./session_state.json";
 import { jitterWait } from "../time-utils";
 import List from "./list";
+import { detailKeyForName } from "../util";
 
 const BASE =
   "healthcare/prod/navigator/v3/publicdse_providerdetails/" +
   "publicdse_individualproviderdetails";
 
-const DETAIL_SET_KEY = "aetna:detail";
+const DETAIL_SET_KEY = detailKeyForName(NETWORK_NAME);
 
 export default class Detail extends Base {
   constructor(browser, redis) {

@@ -1,10 +1,15 @@
 import { Bar, Presets } from "../bar";
-import Base, { queryStringFromParams, RESULT_SET_KEY } from "./base";
+import Base, {
+  NETWORK_NAME,
+  queryStringFromParams,
+  RESULT_SET_KEY
+} from "./base";
+import { searchStateKeyForName } from "../util";
 
 const RESULTS_PER_PAGE = 25;
 
-const PAGINATION_KEY = "aetna:last-page";
-const TOTAL_FROM_LAST = "aetna:total-last";
+const PAGINATION_KEY = searchStateKeyForName(NETWORK_NAME);
+const TOTAL_FROM_LAST = NETWORK_NAME + ":total-last";
 
 export default class List extends Base {
   constructor(browser, redis) {

@@ -5,8 +5,10 @@ import { jitterWait } from "../time-utils";
 import request from "request";
 import { BCBSSearch, RETRY } from "./search";
 import { FEDERAL } from "./data";
+import { listingKeyForName } from "../util";
 
-const PROVIDER_KEY = "bcbs:providers";
+export const NETWORK_NAME = "bcbs";
+const PROVIDER_KEY = listingKeyForName(NETWORK_NAME);
 
 export default class Crawl {
   constructor(browser, redis) {
