@@ -56,7 +56,11 @@ export default class Page {
 
   onResponse(callback) {
     this._page.on("response", callback);
-    return () => this._page.removeListener("response", callback);
+    return () => {
+      if (this._page) {
+        this._page.removeListener("response", callback);
+      }
+    };
   }
 
   /**

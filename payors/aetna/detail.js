@@ -4,6 +4,7 @@ import sessionState from "./session_state.json";
 import { jitterWait } from "../time-utils";
 import List from "./list";
 import { detailKeyForName } from "../util";
+import { w } from "../log";
 
 const BASE =
   "healthcare/prod/navigator/v3/publicdse_providerdetails/" +
@@ -65,15 +66,6 @@ export default class Detail extends Base {
     const loadPromises = new Set();
     const MAX_CONCURRENT = 10;
 
-    let hardStop = false;
-
-    const sigHandle = () => {
-      console.log("Caught SIGTERM! Stopping...");
-      hardStop = true;
-    };
-
-    process.on("SIGINT", sigHandle);
-
     let index = 0;
     const findNextProviderID = () => {
       while (index < len) {
@@ -88,22 +80,18 @@ export default class Detail extends Base {
     };
 
     const loadAndClose = async providerID => {
-      if (hardStop) {
-        return;
-      }
       console.debug(`${new Date()} : loading ${providerID} ${index}/${len}`);
       const page = await this.getDetailForProvider(providerID);
 
       // A null response means that we're not gonna process this one
       if (page !== null) {
-        await jitterWait(2500, 2500);
         page.close();
-        await jitterWait(2500, 2500);
+        await jitterWait(3000, 2000);
       }
 
       // If there are still more to be processed, check them
       const nextID = findNextProviderID();
-      if (nextID !== null && !hardStop) {
+      if (nextID !== null) {
         return loadAndClose(nextID);
       }
     };
@@ -111,7 +99,7 @@ export default class Detail extends Base {
     // Start a limited amount of processes
     for (let i = 0; i < MAX_CONCURRENT; i++) {
       const nextID = findNextProviderID();
-      if (nextID === null || hardStop) {
+      if (nextID === null) {
         break;
       }
       let prom = loadAndClose(nextID);
@@ -122,8 +110,6 @@ export default class Detail extends Base {
     // Wait for all page closures to return
     console.log("Waiting for all page promises to resolve...");
     await Promise.all(Array.from(loadPromises));
-
-    process.removeListener("SIGINT", sigHandle);
   }
 
   async getDetailForProvider(providerID) {
@@ -151,6 +137,12 @@ export default class Detail extends Base {
     const details = await waitForDetails;
 
     const clickPageSelector = async (select, promise) => {
+      const sel = await page.$(select);
+      if (!sel) {
+        w("Skipping " + select);
+        return;
+      }
+
       await jitterWait(500, 250);
       await page.click(select);
       await jitterWait(500, 250);

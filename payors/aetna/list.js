@@ -108,17 +108,7 @@ export default class List extends Base {
   }
 
   async scanProviders() {
-    let hardStop = false;
-
     const bar = new Bar({}, Presets.shades_classic);
-
-    const sigHandle = () => {
-      bar.stop();
-      console.log("Caught SIGTERM! Stopping...");
-      hardStop = true;
-    };
-
-    process.on("SIGINT", sigHandle);
 
     console.log("Preliminary scrape");
     await this.scanPage();
@@ -127,7 +117,7 @@ export default class List extends Base {
     bar.start(this.getTotalPages(), this._currentPage);
 
     // @TODO: Is <= correct ?
-    while (this._currentPage <= this.getTotalPages() && !hardStop) {
+    while (this._currentPage <= this.getTotalPages()) {
       await this.scanPage();
       bar.update(this._currentPage);
     }

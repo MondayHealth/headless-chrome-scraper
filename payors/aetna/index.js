@@ -20,6 +20,14 @@ async function loadDetail(browser, redis) {
 }
 
 export async function crawl(browser, redis) {
-  await scanProviders(browser, redis);
+
+  const sigHandle = () => {
+    console.log("Caught SIGTERM! Stopping...");
+    process.exit(1);
+  };
+
+  process.on("SIGINT", sigHandle);
+
+  // await scanProviders(browser, redis);
   await loadDetail(browser, redis);
 }
