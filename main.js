@@ -19,9 +19,12 @@ function getArguments() {
   return ret;
 }
 
-// noinspection JSUnusedGlobalSymbols
-export async function bootstrap() {
-  const args = getArguments();
+/**
+ *
+ * @param args {Object.<string, string>}
+ * @returns {Promise<void>}
+ */
+async function scrape(args) {
   const network = args.network;
   const crawl = getCrawlFunction(network);
   const headless = args.headless === undefined ? true : args.headless;
@@ -40,4 +43,31 @@ export async function bootstrap() {
   console.log("Closing browser...");
   browser.close().catch(e => console.error(e));
   redisClient.quit();
+}
+
+/**
+ *
+ * @param args {Object.<string, string>}
+ * @returns {Promise<void>}
+ */
+async function purify(args) {
+  const redisAddress = args.redis;
+  l(`Purifying ${redisAddress ? redisAddress : "localhost"}`);
+
+  
+}
+
+// noinspection JSUnusedGlobalSymbols
+export async function bootstrap() {
+  const args = getArguments();
+
+  if (args.network) {
+    await scrape(args);
+  } else if (args.purify) {
+    await purify(args);
+  } else {
+    throw new Error(
+      "Currently only 'network' and 'purify' options are supported."
+    );
+  }
 }
