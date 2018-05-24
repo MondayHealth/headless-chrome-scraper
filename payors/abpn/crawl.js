@@ -9,6 +9,7 @@ import {
   listingKeyForName,
   searchStateKeyForName
 } from "../util";
+import { generateHGet } from "../redis-util";
 
 const NETWORK_NAME = "abpn";
 const SEARCH_KEY = searchStateKeyForName(NETWORK_NAME);
@@ -47,10 +48,9 @@ export default class Crawl {
     // noinspection JSUnresolvedVariable
     this._rHSet = promisify(redis.hset).bind(redis);
     // noinspection JSUnresolvedVariable
-    this._rHGet = promisify(redis.hget).bind(redis);
-    // noinspection JSUnresolvedVariable
     this._rHExists = promisify(redis.hexists).bind(redis);
 
+    this._rHGet = generateHGet(redis);
     this._rSet = promisify(redis.set).bind(redis);
     this._rGet = promisify(redis.get).bind(redis);
 

@@ -45,3 +45,7 @@ export function listingKeyForName(name) {
 export function networkKeyForName(name) {
   return name + ":provider-network";
 }
+
+export function purifiedKeyForName(name) {
+  return name + ":purified";
+}

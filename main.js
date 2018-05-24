@@ -1,6 +1,6 @@
 import puppeteer from "puppeteer";
 import redis from "redis";
-import { getCrawlFunction } from "./payors";
+import { getCrawlFunction, getPurifierFunction } from "./payors";
 import { l } from "./payors/log";
 
 /**
@@ -51,10 +51,50 @@ async function scrape(args) {
  * @returns {Promise<void>}
  */
 async function purify(args) {
-  const redisAddress = args.redis;
-  l(`Purifying ${redisAddress ? redisAddress : "localhost"}`);
+  const host = args.redis ? args.redis : "localhost";
 
-  
+  const redisClient = redis.createClient({ host });
+
+  l(`Purifying Redis @ ${host}`);
+
+  const networks = [
+    "abpn",
+    "aetna",
+    "bcbs",
+    "cigna",
+    "cignabhd",
+    "emblem",
+    "gt",
+    "oscar",
+    "pt",
+    "united"
+  ];
+
+  const purifyNetwork = async name => {
+    const Constructor = getPurifierFunction(name);
+    const instance = new Constructor(redisClient);
+    await instance.purify();
+    return instance.destroy();
+  };
+
+  try {
+    if (args.purify !== true) {
+      // Here we assume its purify=network_name
+      const networkSet = new Set(networks);
+      const networkName = args.purify;
+      if (!networkSet.has(networkName)) {
+        throw new Error(`Unknown network: ${args.purify}`);
+      }
+      await purifyNetwork(networkName);
+    } else {
+      l("No network specified. Purifying all networks.");
+      for (let i = 0; i < networks.length; i++) {
+        await purifyNetwork(networks[i]);
+      }
+    }
+  } finally {
+    redisClient.quit();
+  }
 }
 
 // noinspection JSUnusedGlobalSymbols
